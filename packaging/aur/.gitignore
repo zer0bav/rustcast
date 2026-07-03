@@ -1,5 +1,6 @@
-# makepkg build artifacts — never commit these
-/src/
-/pkg/
-*.pkg.tar.*
-*.log
+# Only the packaging files belong here; everything else is a makepkg build
+# artifact (src/, pkg/, the git source clone, built packages, logs).
+/*
+!.gitignore
+!PKGBUILD
+!.SRCINFO
