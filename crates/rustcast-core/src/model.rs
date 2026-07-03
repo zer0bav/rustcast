@@ -35,6 +35,17 @@ pub enum Action {
     RevealFile(String),
     /// Set the active cyber target (host[:port]).
     SetTarget(String),
+    /// Replace the search box text (used for prefix tools like `= ` or `b64 `).
+    SetQuery(String),
+    /// Enter an isolated command mode routed to the provider whose id is `id`
+    /// (e.g. "Kill Process" → id "procs"). The box clears and typing just
+    /// filters within that mode; Esc backs out. `label` is shown to the user.
+    EnterMode { id: String, label: String },
+    /// Save a new quicklink to the config and reload it live. Handled GUI-side.
+    AddQuicklink { name: String, template: String, kind: String },
+    /// Send a signal to a PID (SIGTERM=15, SIGKILL=9). Handled GUI-side: the
+    /// launcher stays open and re-queries so you can kill several in a row.
+    Signal { pid: i32, signal: i32 },
     /// Do nothing (informational rows).
     None,
 }
@@ -46,6 +57,8 @@ pub enum Prev {
     None,
     /// Show plain / monospace text (also used for pretty-printed JSON).
     Text(String),
+    /// Render lightweight Markdown (headers, inline `code`) in the preview.
+    Markdown(String),
     /// Decode a `cliphist list` line to a temp image (legacy clipboard).
     ClipImage(String),
     /// Load an image straight from an absolute path (thumbnails, files).

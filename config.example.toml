@@ -8,7 +8,7 @@ animations = true
 # theme = "/path/to/custom/style.css"   # else ~/.config/rustcast/style.css, else bundled
 
 [general]
-default_tab = "apps"          # apps | clipboard | files | cyber | extensions
+default_tab = "apps"          # apps | clipboard | files | cyber | cheat | extensions
 terminal = "kitty -e"         # auto-detected if omitted
 
 [clipboard]
@@ -54,3 +54,17 @@ template = "rg {query} ~"
 # keyword = "sig"
 # name = "Email signature"
 # text = "Best,\nzer0bav"
+
+# ── Cheatsheets ─────────────────────────────────────────────
+# The Cheats tab bundles curated references (nmap, tmux, vim, curl, gdb,
+# hashcat, sqlmap, linux-privesc…). Drop your own Markdown/text files into
+# ~/.config/rustcast/cheatsheets/ and they show up automatically — the file
+# name becomes the title. No config needed.
+
+# ── Command modes (no config) ───────────────────────────────
+# Pick one from the root list and press Enter to drop into an isolated view;
+# typing then just filters within it, and Esc backs out.
+#   Kill Process     terminate processes (Enter = SIGTERM, Ctrl+K = SIGKILL)
+#   Window Switcher  switch open windows (Hyprland / Sway) — also the Windows tab
+#   Port Inspector   show/kill what is listening on a port (needs ss or lsof)
+#   Generate Secret  passwords, hex/base64 tokens, UUIDs, PINs

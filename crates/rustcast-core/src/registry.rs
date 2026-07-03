@@ -70,18 +70,27 @@ impl Registry {
         active_tab: Tab,
         matcher: &fuzzy_matcher::skim::SkimMatcherV2,
         target: Option<&str>,
+        mode: Option<&str>,
     ) -> Vec<Item> {
         let mut collected: Vec<Item> = Vec::new();
 
-        if let Some((provider, plen)) = self.prefix_match(raw) {
+        if let Some(mode_id) = mode {
+            // Inside a command mode: the whole query is a filter for one
+            // provider — no prefix parsing, so nothing collides with it.
+            if let Some(p) = self.providers.iter().find(|p| p.id() == mode_id) {
+                let query = raw.trim();
+                let ctx = QueryCtx { raw, query, active_tab, matcher, target, mode };
+                collected.extend(p.query(&ctx));
+            }
+        } else if let Some((provider, plen)) = self.prefix_match(raw) {
             let query = raw.trim_start()[plen..].trim();
-            let ctx = QueryCtx { raw, query, active_tab, matcher, target };
+            let ctx = QueryCtx { raw, query, active_tab, matcher, target, mode: None };
             collected.extend(provider.query(&ctx));
         } else {
             let query = raw.trim();
             for p in &self.providers {
                 if p.tab() == active_tab {
-                    let ctx = QueryCtx { raw, query, active_tab, matcher, target };
+                    let ctx = QueryCtx { raw, query, active_tab, matcher, target, mode: None };
                     collected.extend(p.query(&ctx));
                 }
             }

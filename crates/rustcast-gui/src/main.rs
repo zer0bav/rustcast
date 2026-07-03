@@ -30,13 +30,15 @@ const APP_ID: &str = "dev.zer0bav.rustcast";
 
 /// Shared, mutable app state passed into the GTK closures.
 struct State {
-    registry: Registry,
+    registry: RefCell<Registry>,
     matcher: fuzzy_matcher::skim::SkimMatcherV2,
     items: RefCell<Vec<Item>>,
     active_tab: Cell<Tab>,
     target: RefCell<Option<String>>,
     env: Env,
     clip_store: Option<Rc<Store>>,
+    /// Active command mode: (provider id, display label). `None` = normal tab.
+    mode: RefCell<Option<(String, String)>>,
 }
 
 fn main() {
@@ -67,7 +69,7 @@ fn main() {
             "rustcast — a Raycast-class launcher for Linux\n\n\
              USAGE:\n  rustcast [--tab <name>] [--query <text>]\n\n\
              FLAGS:\n\
-             \x20 --tab <apps|clipboard|files|cyber|extensions>  open on a tab\n\
+             \x20 --tab <apps|clipboard|files|cyber|cheat|extensions>  open on a tab\n\
              \x20 --query <text>   pre-fill the search box\n\
              \x20 --version        print version\n\
              \x20 --help           show this help\n\n\
@@ -204,6 +206,8 @@ fn tab_from_config(s: &str) -> Tab {
         "clipboard" | "clip" => Tab::Clipboard,
         "files" | "file" => Tab::Files,
         "cyber" => Tab::Cyber,
+        "cheat" | "cheats" | "cheatsheets" => Tab::Cheat,
+        "win" | "windows" | "window" => Tab::Win,
         "extensions" | "ext" => Tab::Extensions,
         _ => Tab::Apps,
     }
@@ -225,7 +229,7 @@ fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<St
     }
 
     let state = Rc::new(State {
-        registry: rustcast_core::default_registry(&cfg, clip_store.clone()),
+        registry: RefCell::new(rustcast_core::default_registry(&cfg, clip_store.clone())),
         matcher: ranking::matcher(),
         items: RefCell::new(Vec::new()),
         active_tab: Cell::new(initial_tab),
@@ -236,6 +240,7 @@ fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<St
         }),
         env: Env { terminal: cfg.general.terminal.clone() },
         clip_store,
+        mode: RefCell::new(None),
     });
 
     let window = ApplicationWindow::builder()
@@ -290,7 +295,7 @@ fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<St
     );
 
     let entry = Entry::builder()
-        .placeholder_text(state.registry.placeholder_for(initial_tab))
+        .placeholder_text(state.registry.borrow().placeholder_for(initial_tab))
         .build();
     entry.add_css_class("input");
 
@@ -382,6 +387,11 @@ fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<St
                     prev_img.clear();
                     prev_lbl.set_text(t);
                 }
+                Prev::Markdown(t) => {
+                    prev_img.set_pixel_size(0);
+                    prev_img.clear();
+                    prev_lbl.set_markup(&md_to_pango(t));
+                }
                 Prev::ClipImage(line) => {
                     prev_lbl.set_text("");
                     prev_img.set_pixel_size(320);
@@ -430,6 +440,7 @@ fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<St
             }
             let hints = state
                 .registry
+                .borrow()
                 .footer_hints_for(state.active_tab.get());
             for h in hints {
                 let chip = GtkBox::new(Orientation::Horizontal, 5);
@@ -462,8 +473,11 @@ fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<St
             }
             let tab = state.active_tab.get();
             let target = state.target.borrow();
+            let mode = state.mode.borrow();
+            let mode_id = mode.as_ref().map(|(id, _)| id.as_str());
             let collected =
-                state.registry.route(query, tab, &state.matcher, target.as_deref());
+                state.registry.borrow().route(query, tab, &state.matcher, target.as_deref(), mode_id);
+            drop(mode);
             drop(target);
 
             for it in &collected {
@@ -489,6 +503,9 @@ fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<St
         let rebuild_footer = rebuild_footer.clone();
         move |tab: Tab| {
             state.active_tab.set(tab);
+            // Switching tabs always leaves any active command mode.
+            *state.mode.borrow_mut() = None;
+            entry.remove_css_class("mode-active");
             for (i, b) in tab_buttons.iter().enumerate() {
                 if Tab::from_index(i) == Some(tab) {
                     b.add_css_class("tab-active");
@@ -496,7 +513,7 @@ fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<St
                     b.remove_css_class("tab-active");
                 }
             }
-            entry.set_placeholder_text(Some(state.registry.placeholder_for(tab)));
+            entry.set_placeholder_text(Some(state.registry.borrow().placeholder_for(tab)));
             rebuild(&entry.text());
             rebuild_footer();
         }
@@ -546,10 +563,19 @@ fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<St
             let shift = mods.contains(ModifierType::SHIFT_MASK);
             match keyval {
                 Key::Escape => {
-                    if entry.text().is_empty() {
-                        win.close();
-                    } else {
+                    let in_mode = state.mode.borrow().is_some();
+                    if in_mode && entry.text().is_empty() {
+                        // Back out of the command mode to the normal tab.
+                        *state.mode.borrow_mut() = None;
+                        entry.remove_css_class("mode-active");
+                        entry.set_placeholder_text(Some(
+                            state.registry.borrow().placeholder_for(state.active_tab.get()),
+                        ));
+                        rebuild("");
+                    } else if !entry.text().is_empty() {
                         entry.set_text("");
+                    } else {
+                        win.close();
                     }
                     Propagation::Stop
                 }
@@ -566,14 +592,16 @@ fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<St
                     switch_tab(Tab::from_index(prev).unwrap());
                     Propagation::Stop
                 }
-                // direct tab jump: Ctrl+1..5
-                Key::_1 | Key::_2 | Key::_3 | Key::_4 | Key::_5 if ctrl => {
+                // direct tab jump: Ctrl+1..7
+                Key::_1 | Key::_2 | Key::_3 | Key::_4 | Key::_5 | Key::_6 | Key::_7 if ctrl => {
                     let n = match keyval {
                         Key::_1 => 0,
                         Key::_2 => 1,
                         Key::_3 => 2,
                         Key::_4 => 3,
-                        _ => 4,
+                        Key::_5 => 4,
+                        Key::_6 => 5,
+                        _ => 6,
                     };
                     if let Some(t) = Tab::from_index(n) {
                         switch_tab(t);
@@ -687,6 +715,43 @@ fn apply_action(
             rebuild("");
             return;
         }
+        Action::SetQuery(text) => {
+            // Drop a prefix into the box (cyber toolkit: `= `, `b64 `, …).
+            entry.set_text(text);
+            entry.set_position(-1);
+            entry.grab_focus();
+            entry.set_position(-1);
+            rebuild(text);
+            return;
+        }
+        Action::EnterMode { id, label } => {
+            // Enter an isolated command view: the box becomes a pure filter for
+            // this provider, so no typed word can collide with an app name.
+            *state.mode.borrow_mut() = Some((id.clone(), label.clone()));
+            entry.add_css_class("mode-active");
+            entry.set_placeholder_text(Some(&format!("{label} — type to filter · Esc to exit")));
+            entry.set_text("");
+            entry.grab_focus();
+            rebuild("");
+            return;
+        }
+        Action::AddQuicklink { name, template, kind } => {
+            // Save to config, then reload the registry so it works immediately.
+            if Config::append_quicklink(name, template, kind).is_ok() {
+                let cfg = Config::load();
+                *state.registry.borrow_mut() =
+                    rustcast_core::default_registry(&cfg, state.clip_store.clone());
+            }
+            // Leave the add mode; the new quicklink is now live.
+            *state.mode.borrow_mut() = None;
+            entry.remove_css_class("mode-active");
+            entry.set_placeholder_text(Some(
+                state.registry.borrow().placeholder_for(state.active_tab.get()),
+            ));
+            entry.set_text("");
+            rebuild("");
+            return;
+        }
         Action::ClipDelete(id) => {
             if let Some(store) = &state.clip_store {
                 let _ = store.delete(*id);
@@ -705,6 +770,16 @@ fn apply_action(
             if let Some(store) = &state.clip_store {
                 let _ = store.clear();
             }
+            rebuild(&entry.text());
+            return;
+        }
+        Action::Signal { pid, signal } => {
+            // Kill the target, then re-query so the row disappears and the
+            // launcher stays open for the next one.
+            let _ = std::process::Command::new("kill")
+                .arg(format!("-{signal}"))
+                .arg(pid.to_string())
+                .status();
             rebuild(&entry.text());
             return;
         }
@@ -842,6 +917,63 @@ fn attach_file_drag(row: &ListBoxRow, path: &str) {
         Some(gdk::ContentProvider::new_union(&[by_files, by_uri]))
     });
     row.add_controller(src);
+}
+
+/// Render lightweight Markdown to Pango markup for the preview label: headers
+/// become larger/bold, `inline code` becomes monospace, everything else is
+/// escaped and passed through (the body stays monospace via CSS).
+fn md_to_pango(src: &str) -> String {
+    let mut out = String::with_capacity(src.len() + src.len() / 4);
+    // Only the first non-empty `# …` is the document title; later single-`#`
+    // lines are shell comments (`# on attacker`), rendered dimmed — not headers.
+    let mut seen_title = false;
+    for line in src.lines() {
+        if let Some(rest) = line.strip_prefix("### ") {
+            out.push_str(&format!("<span weight='bold'>{}</span>", pango_escape(rest)));
+        } else if let Some(rest) = line.strip_prefix("## ") {
+            out.push_str(&format!("<span size='large' weight='bold' foreground='#ff6b6b'>{}</span>", pango_escape(rest)));
+        } else if let Some(rest) = line.strip_prefix("# ") {
+            if !seen_title {
+                seen_title = true;
+                out.push_str(&format!("<span size='x-large' weight='bold' foreground='#ff6b6b'>{}</span>", pango_escape(rest)));
+            } else {
+                out.push_str(&format!("<span foreground='#8a8a8a'>{}</span>", pango_escape(line)));
+            }
+        } else {
+            if !line.trim().is_empty() {
+                seen_title = true;
+            }
+            out.push_str(&inline_code(&pango_escape(line)));
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// Escape the three characters Pango markup treats specially.
+fn pango_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+/// Wrap backtick-delimited spans of already-escaped text in `<tt>` (monospace).
+fn inline_code(escaped: &str) -> String {
+    if !escaped.contains('`') {
+        return escaped.to_string();
+    }
+    let mut out = String::with_capacity(escaped.len());
+    let mut in_code = false;
+    for c in escaped.chars() {
+        if c == '`' {
+            out.push_str(if in_code { "</tt>" } else { "<tt>" });
+            in_code = !in_code;
+        } else {
+            out.push(c);
+        }
+    }
+    if in_code {
+        out.push_str("</tt>");
+    }
+    out
 }
 
 fn is_image_path(p: &str) -> bool {

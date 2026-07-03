@@ -156,6 +156,12 @@ pub fn do_action(a: &Action, env: &Env) -> bool {
         }
         // Setting a target keeps the window open; the GUI handles the state update.
         Action::SetTarget(_) => false,
+        // These are GUI-side view changes; the window stays open.
+        Action::SetQuery(_) => false,
+        Action::EnterMode { .. } => false,
+        Action::AddQuicklink { .. } => false,
+        // Signals keep the window open; the GUI runs the kill then re-queries.
+        Action::Signal { .. } => false,
         Action::None => false,
     }
 }

@@ -138,6 +138,12 @@ impl Config {
             .map(|d| d.config_dir().join("config.toml"))
     }
 
+    /// `~/.config/rustcast`
+    pub fn config_dir() -> Option<PathBuf> {
+        directories::ProjectDirs::from("dev", "zer0bav", "rustcast")
+            .map(|d| d.config_dir().to_path_buf())
+    }
+
     /// `~/.local/share/rustcast`
     pub fn data_dir() -> Option<PathBuf> {
         directories::ProjectDirs::from("dev", "zer0bav", "rustcast")
@@ -162,6 +168,27 @@ impl Config {
                 Config::default()
             }
         }
+    }
+
+    /// Append a `[[quicklinks]]` block to the config file, preserving everything
+    /// already there (comments included — we never rewrite the whole file).
+    /// Creates the file if missing.
+    pub fn append_quicklink(name: &str, template: &str, kind: &str) -> anyhow::Result<()> {
+        let path = Config::config_path().ok_or_else(|| anyhow::anyhow!("no config dir"))?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+        let mut block = String::from("\n[[quicklinks]]\n");
+        block.push_str(&format!("name = \"{}\"\n", esc(name)));
+        block.push_str(&format!("template = \"{}\"\n", esc(template)));
+        if kind != "url" {
+            block.push_str(&format!("kind = \"{}\"\n", esc(kind)));
+        }
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+        f.write_all(block.as_bytes())?;
+        Ok(())
     }
 
     /// Persist the config back to disk (used by the settings view).

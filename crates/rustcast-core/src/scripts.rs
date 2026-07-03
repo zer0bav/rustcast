@@ -108,11 +108,11 @@ impl Provider for ScriptProvider {
         if self.plugins.is_empty() {
             return vec![Item::new(
                 "No extensions installed",
-                "add one under ~/.config/rustcast/plugins/<name>/manifest.toml",
+                "press Enter to open the plugins folder",
                 "application-x-addon",
                 "ext",
                 1,
-                Action::None,
+                Action::RunShell("d=\"$HOME/.config/rustcast/plugins\"; mkdir -p \"$d\"; xdg-open \"$d\"".into()),
             )];
         }
 

@@ -14,11 +14,14 @@ pub enum Tab {
     Clipboard,
     Files,
     Cyber,
+    Cheat,
+    Win,
     Extensions,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 5] = [Tab::Apps, Tab::Clipboard, Tab::Files, Tab::Cyber, Tab::Extensions];
+    pub const ALL: [Tab; 7] =
+        [Tab::Apps, Tab::Clipboard, Tab::Files, Tab::Cyber, Tab::Cheat, Tab::Win, Tab::Extensions];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -26,6 +29,8 @@ impl Tab {
             Tab::Clipboard => "Clipboard",
             Tab::Files => "Files",
             Tab::Cyber => "Cyber",
+            Tab::Cheat => "Cheats",
+            Tab::Win => "Windows",
             Tab::Extensions => "Extensions",
         }
     }
@@ -48,6 +53,11 @@ pub struct QueryCtx<'a> {
     pub active_tab: Tab,
     pub matcher: &'a SkimMatcherV2,
     pub target: Option<&'a str>,
+    /// When set, an isolated command mode is active and the query routes only to
+    /// the provider whose [`Provider::id`] equals this. Tool providers (process
+    /// killer, window switcher, secret generator, port inspector) respond only
+    /// in their mode, so typing a word like `kill` never collides with an app.
+    pub mode: Option<&'a str>,
 }
 
 /// A hint chip shown in the animated footer.
