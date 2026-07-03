@@ -1,0 +1,5 @@
+# makepkg build artifacts — never commit these
+/src/
+/pkg/
+*.pkg.tar.*
+*.log

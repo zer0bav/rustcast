@@ -1,7 +1,7 @@
-# Maintainer: zer0bav <psainfinitysocteam@gmail.com>
+# Maintainer: zer0bav <baverozmen@proton.me>
 pkgname=rustcast-git
 _pkgname=rustcast
-pkgver=r1
+pkgver=r5.6d65a29
 pkgrel=1
 pkgdesc="A Raycast-class launcher for Linux (GTK4 + layer-shell) with a tldr search, clipboard history, and a cybersecurity toolkit"
 arch=('x86_64')
@@ -9,6 +9,10 @@ url="https://github.com/zer0bav/rustcast"
 license=('MIT')
 depends=('gtk4' 'gtk4-layer-shell')
 makedepends=('cargo' 'git')
+# Disable makepkg's global LTO: it injects -flto into the C build of the bundled
+# SQLite (rusqlite), producing GCC bitcode that rust's linker can't resolve
+# (undefined sqlite3_bind_*). The Cargo release profile still does Rust-side LTO.
+options=('!lto')
 optdepends=(
   'wl-clipboard: clipboard history and {clipboard} snippets on Wayland'
   'xclip: clipboard support on X11'
