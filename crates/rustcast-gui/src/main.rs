@@ -1371,7 +1371,11 @@ fn load_css(cfg: &Config) {
     } else if let Some(p) = Config::user_css() {
         provider.load_from_path(&p);
     } else {
-        provider.load_from_path(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/style.css"));
+        // Embed the default theme at compile time so the binary is self-contained
+        // (a packaged/installed binary has no source tree to read from).
+        const DEFAULT_CSS: &str =
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/style.css"));
+        provider.load_from_data(DEFAULT_CSS);
     }
     if let Some(d) = Display::default() {
         gtk4::style_context_add_provider_for_display(&d, &provider, STYLE_PROVIDER_PRIORITY_APPLICATION);
