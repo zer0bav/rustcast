@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = ["crates/rustcast-core", "crates/rustcast-gui"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+description = "Raycast-class Wayland launcher in Rust — fast, scriptable, cybersec-focused"
+
+[workspace.dependencies]
+fuzzy-matcher = "0.3"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+directories = "5"
+anyhow = "1"
+base64 = "0.22"
+hex = "0.4"
+urlencoding = "2"
+sha2 = "0.10"
+sha1 = "0.10"
+md-5 = "0.10"
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+ipnet = "2"
+rusqlite = { version = "0.31", features = ["bundled"] }
+ignore = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true

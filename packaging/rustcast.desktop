@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=rustcast
+GenericName=Application Launcher
+Comment=Raycast-class launcher with a cybersecurity toolkit
+Exec=rustcast
+Icon=system-search
+Terminal=false
+Categories=Utility;System;
+Keywords=launcher;search;clipboard;cyber;
+StartupNotify=false

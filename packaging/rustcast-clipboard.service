@@ -1,0 +1,14 @@
+[Unit]
+Description=rustcast clipboard history daemon
+Documentation=https://github.com/zer0bav/rustcast
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/rustcast --clip-daemon
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

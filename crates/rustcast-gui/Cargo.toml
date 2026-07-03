@@ -1,0 +1,16 @@
+[package]
+name = "rustcast-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "rustcast GUI — GTK4 layer-shell launcher binary"
+
+[[bin]]
+name = "rustcast"
+path = "src/main.rs"
+
+[dependencies]
+rustcast-core = { path = "../rustcast-core" }
+gtk4 = { version = "0.9", features = ["v4_10"] }
+gtk4-layer-shell = "0.5"
+fuzzy-matcher.workspace = true

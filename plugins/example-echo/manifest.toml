@@ -1,0 +1,7 @@
+# Example rustcast extension.
+# Copy this directory to ~/.config/rustcast/plugins/ to activate it, then open
+# the Extensions tab and type:  echo <something>
+name = "echo"
+prefix = "echo"
+icon = "utilities-terminal"
+exec = "echo.sh"

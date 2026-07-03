@@ -1,0 +1,69 @@
+//! Text-expansion snippets from config. Triggered by keyword or name from the
+//! Apps (root) tab; activating copies the (token-expanded) text.
+
+use crate::config::Snippet;
+use crate::model::{Action, Item};
+use crate::provider::{Provider, QueryCtx, Tab};
+use fuzzy_matcher::FuzzyMatcher;
+
+pub struct SnippetsProvider {
+    snippets: Vec<Snippet>,
+}
+
+impl SnippetsProvider {
+    pub fn new(snippets: Vec<Snippet>) -> Self {
+        SnippetsProvider { snippets }
+    }
+}
+
+/// Expand `{date}` / `{time}` tokens in snippet text.
+pub fn expand(text: &str) -> String {
+    if !text.contains('{') {
+        return text.to_string();
+    }
+    let now = chrono::Local::now();
+    text.replace("{date}", &now.format("%Y-%m-%d").to_string())
+        .replace("{time}", &now.format("%H:%M").to_string())
+        .replace("{datetime}", &now.format("%Y-%m-%d %H:%M").to_string())
+}
+
+impl Provider for SnippetsProvider {
+    fn id(&self) -> &'static str {
+        "snippets"
+    }
+    fn tab(&self) -> Tab {
+        Tab::Apps
+    }
+    fn query(&self, ctx: &QueryCtx) -> Vec<Item> {
+        let q = ctx.query.trim().to_lowercase();
+        if q.is_empty() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for s in &self.snippets {
+            let name = if s.name.is_empty() { &s.keyword } else { &s.name };
+            let hay = format!("{} {} {}", s.keyword, name, s.text).to_lowercase();
+            let kw_match = !s.keyword.is_empty() && s.keyword.to_lowercase() == q;
+            let score = if kw_match {
+                6000
+            } else {
+                match ctx.matcher.fuzzy_match(&hay, &q) {
+                    Some(s) => s,
+                    None => continue,
+                }
+            };
+            let expanded = expand(&s.text);
+            let item = Item::new(
+                name.clone(),
+                expanded.replace('\n', " ").chars().take(80).collect::<String>(),
+                "text-x-generic",
+                "snippet",
+                score,
+                Action::Copy(expanded.clone()),
+            )
+            .with_prev(crate::model::Prev::Text(expanded));
+            out.push(item);
+        }
+        out
+    }
+}
