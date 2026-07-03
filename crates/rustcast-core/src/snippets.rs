@@ -16,15 +16,22 @@ impl SnippetsProvider {
     }
 }
 
-/// Expand `{date}` / `{time}` tokens in snippet text.
+/// Expand `{date}` / `{time}` / `{datetime}` / `{clipboard}` tokens in snippet
+/// text. `{clipboard}` is read from the live clipboard only when present (so
+/// snippets without it never shell out).
 pub fn expand(text: &str) -> String {
     if !text.contains('{') {
         return text.to_string();
     }
     let now = chrono::Local::now();
-    text.replace("{date}", &now.format("%Y-%m-%d").to_string())
+    let mut out = text
+        .replace("{date}", &now.format("%Y-%m-%d").to_string())
         .replace("{time}", &now.format("%H:%M").to_string())
-        .replace("{datetime}", &now.format("%Y-%m-%d %H:%M").to_string())
+        .replace("{datetime}", &now.format("%Y-%m-%d %H:%M").to_string());
+    if out.contains("{clipboard}") {
+        out = out.replace("{clipboard}", &crate::action::paste_text());
+    }
+    out
 }
 
 impl Provider for SnippetsProvider {

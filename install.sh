@@ -39,6 +39,8 @@ say "Building rustcast (release)…"
 ( cd "$REPO_DIR" && cargo build --release )
 
 # ── 3. install binary ────────────────────────────────────────────────
+# Stop any resident instance so the new binary replaces it cleanly on upgrade.
+"$BIN_DIR/rustcast" --quit 2>/dev/null || true
 say "Installing binary to $BIN_DIR"
 mkdir -p "$BIN_DIR"
 install -m755 "$REPO_DIR/target/release/rustcast" "$BIN_DIR/rustcast"
@@ -58,7 +60,20 @@ if [ ! -f "$CFG_DIR/config.toml" ]; then
   install -m644 "$REPO_DIR/config.example.toml" "$CFG_DIR/config.toml"
 fi
 
-# ── 5. clipboard daemon (systemd user service, optional) ─────────────
+# ── 5. resident launcher daemon (systemd user service) ───────────────
+# Pre-warms the launcher at login so the first hotkey press is instant.
+if command -v systemctl >/dev/null 2>&1; then
+  say "Enabling resident launcher daemon (systemd user service)"
+  mkdir -p "$SERVICE_DIR"
+  install -m644 "$REPO_DIR/packaging/rustcast.service" "$SERVICE_DIR/rustcast.service"
+  systemctl --user daemon-reload || true
+  systemctl --user enable --now rustcast.service 2>/dev/null || \
+    warn "Could not start the launcher daemon now (no graphical session?). It will start on next login."
+else
+  warn "No systemd: the launcher still works, but the first press each session pays a one-time startup cost."
+fi
+
+# ── 6. clipboard daemon (systemd user service, optional) ─────────────
 if command -v systemctl >/dev/null 2>&1 && command -v wl-paste >/dev/null 2>&1; then
   say "Enabling clipboard history daemon (systemd user service)"
   mkdir -p "$SERVICE_DIR"
@@ -70,10 +85,13 @@ else
   warn "Skipping clipboard daemon: needs systemd + wl-clipboard (Wayland). Copy/paste still works via xclip on X11."
 fi
 
-# ── 6. keybinding help ───────────────────────────────────────────────
+# ── 7. keybinding help ───────────────────────────────────────────────
 cat <<EOF
 
-$(say "Done. Bind a global hotkey to launch rustcast:")
+$(say "Done. Bind a global hotkey to toggle rustcast:")
+
+  rustcast now runs as a resident daemon, so the hotkey just runs
+  '$BIN_DIR/rustcast' — it toggles the window instantly (show/hide).
 
   Hyprland  (~/.config/hypr/…):
       bind = SUPER, SPACE, exec, $BIN_DIR/rustcast
@@ -85,6 +103,9 @@ $(say "Done. Bind a global hotkey to launch rustcast:")
 
   GNOME:  Settings → Keyboard → Custom Shortcuts → command:  rustcast
   KDE:    System Settings → Shortcuts → Custom → command:    rustcast
+
+If the overlay ever misbehaves on your compositor, bind
+'rustcast --no-daemon' instead for the classic one-shot mode.
 
 Run 'rustcast --help' for all flags.
 EOF

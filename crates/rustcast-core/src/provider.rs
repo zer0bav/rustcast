@@ -92,4 +92,10 @@ pub trait Provider {
 
     /// Produce ranked items. Called on the GTK main thread — keep it fast.
     fn query(&self, ctx: &QueryCtx) -> Vec<Item>;
+
+    /// Refresh any cached/background state. Called cheaply every time the window
+    /// is shown (daemon mode). Providers that maintain a disk-cached index
+    /// (apps, files, tldr) kick a throttled background rescan here; the default
+    /// is a no-op. Must return immediately — do slow work on a spawned thread.
+    fn refresh(&self) {}
 }

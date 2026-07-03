@@ -30,3 +30,9 @@ ignore = "0.4"
 opt-level = 3
 lto = true
 strip = true
+# Single codegen unit lets LTO optimise across the whole crate graph — faster
+# runtime and a smaller binary, at the cost of slower release builds.
+codegen-units = 1
+# Abort on panic: no unwinding tables (smaller, marginally faster). gtk4-rs
+# already aborts on a panic inside a signal handler, so behaviour is unchanged.
+panic = "abort"

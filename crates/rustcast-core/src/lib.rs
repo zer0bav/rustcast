@@ -11,9 +11,12 @@ pub mod cheatsheets;
 pub mod clip;
 pub mod commands;
 pub mod clipboard;
+pub mod aliases;
 pub mod config;
 pub mod cyber;
+pub mod eval;
 pub mod files;
+pub mod frecency;
 pub mod gen;
 pub mod manage;
 pub mod model;
@@ -27,6 +30,7 @@ pub mod scripts;
 pub mod settings;
 pub mod snippets;
 pub mod system;
+pub mod tldr;
 pub mod windows;
 
 use config::Config;
@@ -44,6 +48,7 @@ pub fn default_registry(
 ) -> Registry {
     let mut reg = Registry::new();
     reg.register(Box::new(pins::PinsProvider::new(pins)));
+    reg.register(Box::new(aliases::AliasProvider::new(cfg.aliases.clone())));
     reg.register(Box::new(commands::CommandsProvider::new()));
     reg.register(Box::new(apps::AppsProvider::new()));
     reg.register(Box::new(calc::CalcProvider::new()));
@@ -66,6 +71,8 @@ pub fn default_registry(
     reg.register(Box::new(cyber::CyberProvider::new()));
     reg.register(Box::new(procs::PortsProvider::new()));
     reg.register(Box::new(gen::GenProvider::new()));
+    // tldr first among Cheat providers so its placeholder/footer hints win.
+    reg.register(Box::new(tldr::TldrProvider::new()));
     reg.register(Box::new(cheatsheets::CheatsheetProvider::new()));
     // SettingsProvider first among Extensions-tab providers so its placeholder
     // wins; the mode-only AddQuicklink provider is registered last.

@@ -48,6 +48,20 @@ pub fn copy_text(text: &str) {
     }
 }
 
+/// Read the current clipboard text (`wl-paste`/`xclip`/`xsel`), empty on failure.
+pub fn paste_text() -> String {
+    let out = if crate::config::which("wl-paste") {
+        Command::new("wl-paste").arg("--no-newline").output()
+    } else if crate::config::which("xclip") {
+        Command::new("xclip").args(["-selection", "clipboard", "-o"]).output()
+    } else if crate::config::which("xsel") {
+        Command::new("xsel").args(["--clipboard", "--output"]).output()
+    } else {
+        return String::new();
+    };
+    out.ok().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default()
+}
+
 /// Copy an image file back onto the clipboard with the right MIME type.
 pub fn copy_image(path: &str, mime: &str) {
     let cmd = if crate::config::which("wl-copy") {
@@ -163,6 +177,8 @@ pub fn do_action(a: &Action, env: &Env) -> bool {
         Action::SetConfig { .. } => false,
         // Signals keep the window open; the GUI runs the kill then re-queries.
         Action::Signal { .. } => false,
+        // Refresh is a GUI-side registry refresh + re-query.
+        Action::Refresh => false,
         Action::None => false,
     }
 }

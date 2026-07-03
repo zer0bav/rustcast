@@ -10,7 +10,17 @@ keyboard-driven, with a built-in **cybersecurity toolkit**.
 
 ## Highlights
 
-- ⚡ **App launcher** — fuzzy search over your `.desktop` apps, with icons
+- ⚡ **Instant** — runs as a resident daemon; the hotkey toggles the window in
+  tens of milliseconds instead of cold-starting GTK each time. The app index is
+  disk-cached and refreshed in the background
+- 🔎 **App launcher** — fuzzy search over your `.desktop` apps, with icons, and
+  **frecency** ranking that floats your most-used items to the top
+- 📖 **tldr search** — the Cheats tab searches the official
+  [tldr-pages](https://github.com/tldr-pages/tldr) (10k+ community command
+  examples). Each example is its own row: Enter copies just that command
+  (placeholders stripped). Downloaded once (~5 MB), then fully offline
+- 🏷️ **Aliases** — `ff` → Firefox, `mail` → Gmail; short triggers you define
+- 🌐 **Web fallback** — a query with no local match offers "Search Google / DuckDuckGo"
 - 📌 **Pin favorites** — Ctrl+K → "Pin to top" sticks your most-used apps,
   quicklinks or commands to the top of the root (persisted across restarts)
 - ⚙️ **In-app settings** — toggle animations / clipboard from the Extensions tab;
@@ -31,13 +41,20 @@ keyboard-driven, with a built-in **cybersecurity toolkit**.
 - 🔌 **Port Inspector** — shows what's listening on a port and kills it
 - 🪟 **Window Switcher** — its own tab (or `Super+Alt+W`); Enter focuses a window
 - 🔐 **Generate Secret** — strong passwords, hex/base64 tokens, UUIDs, PINs
-- 📖 **Cheatsheets** — a browsable tab of Markdown-rendered command references
-  (nmap, tmux, vim, curl, gdb, hashcat, sqlmap, linux-privesc…) plus your own
-  `~/.config/rustcast/cheatsheets/*.md`
+- 📚 **Cheatsheets** — bundled Markdown references (nmap, tmux, vim, curl, gdb,
+  hashcat, sqlmap, linux-privesc…) plus your own `~/.config/rustcast/cheatsheets/*.md`,
+  searchable alongside tldr on the Cheats tab
 - 🔗 **Quicklinks** — `{query}` URL/command templates, addable from the UI
   ("Add Quicklink"), no config editing required
 - 🧩 **Extensions** — script plugins in any language (JSON over stdout)
-- 🧮 **Calculator**, ✂️ **snippets**, 🖥️ **system + window-management commands**
+- 🧮 **Calculator + converter** — works with **no external tools** (built-in
+  evaluator); also unit and currency conversion (`10 km in mi`, `100 f to c`,
+  `10 usd in eur`). Uses `qalc` when installed
+- ✂️ **Snippets** with `{date}` / `{time}` / `{clipboard}` tokens, 🖥️ **system +
+  window-management commands**
+- 🔤 **Clipboard image OCR** — Ctrl+K → "Extract text (OCR)" on an image (tesseract)
+- 🩺 **Dependency check** — the Extensions/settings tab shows which optional tools
+  are present or missing, with install hints
 - ⌨️ **Mode tabs** (Apps · Clipboard · Files · Cyber · Cheats · Windows · Extensions)
   and a Cmd-K style actions menu
 - 🔴⚫ Softened red/black theme, English UI, GTK4
@@ -69,8 +86,11 @@ cd rustcast
 ```
 
 `install.sh` builds the release binary, installs it to `~/.local/bin`, adds a
-desktop entry and default config, and (on systemd + Wayland) enables the clipboard
-history daemon. It prints the exact keybinding snippet for your desktop.
+desktop entry and default config, and (on systemd) enables the resident launcher
+daemon plus, on Wayland, the clipboard history daemon. It prints the exact
+keybinding snippet for your desktop.
+
+**Arch (AUR):** a `rustcast-git` PKGBUILD lives in `packaging/aur/`.
 
 Build dependencies: `cargo`, `gtk4` (dev), and — for the overlay mode on
 wlroots — `gtk4-layer-shell` (dev).
@@ -83,7 +103,9 @@ Fedora:        sudo dnf install gtk4-devel gtk4-layer-shell-devel
 
 ## Bind a hotkey
 
-rustcast doesn't grab a global hotkey itself (that's the compositor's job):
+rustcast doesn't grab a global hotkey itself (that's the compositor's job). It
+runs as a resident daemon, so the same command **toggles** the window — press to
+show, press again to hide:
 
 ```ini
 # Hyprland (~/.config/hypr/…)
@@ -97,6 +119,10 @@ bindsym $mod+v     exec rustcast --tab clipboard
 ```
 - **GNOME:** Settings → Keyboard → Custom Shortcuts → command `rustcast`
 - **KDE:** System Settings → Shortcuts → Custom → command `rustcast`
+
+`rustcast --daemon` starts it resident and hidden (the systemd user service does
+this at login); `rustcast --quit` stops it. If the overlay ever misbehaves on
+your compositor, bind `rustcast --no-daemon` for the classic one-shot mode.
 
 ## Usage
 
@@ -119,15 +145,19 @@ command never collides with an app of the same name. The **Windows** tab (or
 The cyber toolkit still uses inline prefixes (`= 2+2`, `b64 hello`, `hash …`,
 `jwt …`, `cidr …`, `rev host:port`, `link CVE-…`).
 
-**Cheats tab** — browse bundled command references, or drop your own Markdown
-into `~/.config/rustcast/cheatsheets/`. Enter copies the whole sheet; the preview
-pane shows it as you scroll.
+**Cheats tab** — search the tldr-pages (the first use downloads the ~5 MB archive;
+Enter the "Download tldr pages" row). Type a command like `tar extract` or
+`ssh tunnel`: each example is its own row — Enter copies just that command with
+`{{placeholders}}` stripped, Ctrl+K offers "copy with placeholders", "run in
+terminal", and "open page". Bundled cheatsheets and your own Markdown in
+`~/.config/rustcast/cheatsheets/` are searchable here too.
 
 ## Configuration
 
 Config lives at `~/.config/rustcast/config.toml` (see `config.example.toml`):
-UI size, terminal, clipboard cap, file roots, **quicklinks**, and **snippets**.
-Drop a custom theme at `~/.config/rustcast/style.css`.
+UI size, terminal, clipboard cap, file roots, **quicklinks**, **snippets**, and
+**aliases**. Edits apply on the next window show — no restart needed. Drop a
+custom theme at `~/.config/rustcast/style.css`.
 
 ## Extensions
 

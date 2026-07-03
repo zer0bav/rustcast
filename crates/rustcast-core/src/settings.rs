@@ -2,10 +2,53 @@
 //! values, quick actions (open config/stylesheet/folders, rebuild the file index,
 //! clear clipboard), and a discoverable reference of every prefix command.
 
-use crate::config::{Config, Quicklink};
+use crate::config::{which, Config, Quicklink};
 use crate::model::{Action, Item, SecondaryAction};
 use crate::provider::{Provider, QueryCtx, Tab};
 use fuzzy_matcher::FuzzyMatcher;
+
+/// Optional external tools rustcast can use, and what breaks without each.
+/// Each entry is (any-of these binaries, feature label, install hint).
+const DEP_CHECKS: &[(&[&str], &str, &str)] = &[
+    (&["wl-copy", "xclip", "xsel"], "Clipboard copy", "install wl-clipboard (Wayland) or xclip"),
+    (&["wl-paste"], "Clipboard history & {clipboard} snippets", "install wl-clipboard"),
+    (&["xdg-open"], "Open URLs & files", "install xdg-utils"),
+    (&["curl", "wget"], "tldr download", "install curl"),
+    (&["bsdtar", "unzip"], "tldr extract", "install libarchive or unzip"),
+    (&["tesseract"], "Clipboard image OCR", "install tesseract"),
+    (&["qalc"], "Advanced calculator (built-in fallback works without it)", "install libqalculate"),
+    (&["hyprctl", "swaymsg"], "Window switcher", "wlroots compositor only (Hyprland/Sway)"),
+    (&["ss", "lsof"], "Port inspector", "install iproute2 or lsof"),
+];
+
+/// Rows describing which optional tools are present/missing.
+fn dependency_rows() -> Vec<(String, String, &'static str, i64, Action)> {
+    DEP_CHECKS
+        .iter()
+        .map(|(bins, label, hint)| {
+            let present = bins.iter().any(|b| which(b));
+            let names = bins.join(" / ");
+            if present {
+                (
+                    format!("{label}: OK"),
+                    format!("using {names}"),
+                    "emblem-ok",
+                    140,
+                    Action::None,
+                )
+            } else {
+                (
+                    format!("{label}: missing"),
+                    format!("{hint}  ·  needs one of: {names}"),
+                    "dialog-warning",
+                    // Missing deps rank above OK ones so they surface first.
+                    600,
+                    Action::Copy(hint.to_string()),
+                )
+            }
+        })
+        .collect()
+}
 
 pub struct SettingsProvider {
     lines: Vec<(String, String)>,
@@ -156,6 +199,19 @@ impl Provider for SettingsProvider {
                 || ctx.matcher.fuzzy_match(&title.to_lowercase(), &q).is_some();
             if matches {
                 out.push(Item::new(title, sub, icon, "settings", 500, action));
+            }
+        }
+
+        // Dependency status — missing tools surface prominently; searching
+        // "deps"/"dependencies"/a tool name lists them all.
+        let want_deps = q.contains("dep") || q.contains("missing") || q.contains("tool");
+        for (title, sub, icon, score, action) in dependency_rows() {
+            let missing = icon == "dialog-warning";
+            let matches = want_deps
+                || (q.is_empty() && missing)
+                || format!("{title} {sub}").to_lowercase().contains(&q);
+            if matches {
+                out.push(Item::new(title, sub, icon, "deps", score, action));
             }
         }
 

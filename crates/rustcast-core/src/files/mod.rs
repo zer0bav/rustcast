@@ -6,7 +6,13 @@ use crate::config::expand_tilde;
 use crate::model::{Action, Item, Prev, SecondaryAction};
 use crate::provider::{ActionHint, Provider, QueryCtx, Tab};
 use fuzzy_matcher::FuzzyMatcher;
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Instant;
+
+/// Minimum gap between background re-walks (daemon mode calls `refresh` on every
+/// window show; walking the whole home dir every time would be wasteful).
+const REWALK_THROTTLE: std::time::Duration = std::time::Duration::from_secs(300);
 
 #[derive(Clone)]
 pub struct FileEntry {
@@ -26,22 +32,47 @@ const FILE_HINTS: &[ActionHint] = &[
 
 pub struct FilesProvider {
     index: Arc<RwLock<Vec<FileEntry>>>,
+    roots: Vec<String>,
+    ignores: Vec<String>,
+    walking: Arc<AtomicBool>,
+    last_walk: Mutex<Option<Instant>>,
 }
 
 impl FilesProvider {
     /// Build the provider, loading any cached index immediately and kicking off
     /// a fresh background walk.
     pub fn new(roots: Vec<String>, ignores: Vec<String>) -> Self {
-        let index = Arc::new(RwLock::new(load_cache()));
-        let idx = index.clone();
+        let p = FilesProvider {
+            index: Arc::new(RwLock::new(load_cache())),
+            roots,
+            ignores,
+            walking: Arc::new(AtomicBool::new(false)),
+            last_walk: Mutex::new(None),
+        };
+        p.spawn_walk();
+        p
+    }
+
+    /// Re-walk the roots on a background thread, unless one is already running.
+    fn spawn_walk(&self) {
+        if self.walking.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        if let Ok(mut lw) = self.last_walk.lock() {
+            *lw = Some(Instant::now());
+        }
+        let idx = self.index.clone();
+        let roots = self.roots.clone();
+        let ignores = self.ignores.clone();
+        let flag = self.walking.clone();
         std::thread::spawn(move || {
             let entries = walk(&roots, &ignores);
             save_cache(&entries);
             if let Ok(mut w) = idx.write() {
                 *w = entries;
             }
+            flag.store(false, Ordering::SeqCst);
         });
-        FilesProvider { index }
     }
 }
 
@@ -57,6 +88,19 @@ impl Provider for FilesProvider {
     }
     fn footer_hints(&self) -> &'static [ActionHint] {
         FILE_HINTS
+    }
+    fn refresh(&self) {
+        // Throttle: at most one re-walk per REWALK_THROTTLE, so repeated window
+        // shows don't re-crawl the home directory.
+        let due = self
+            .last_walk
+            .lock()
+            .ok()
+            .map(|lw| lw.map(|t| t.elapsed() >= REWALK_THROTTLE).unwrap_or(true))
+            .unwrap_or(false);
+        if due {
+            self.spawn_walk();
+        }
     }
     fn query(&self, ctx: &QueryCtx) -> Vec<Item> {
         let q = ctx.query.trim();

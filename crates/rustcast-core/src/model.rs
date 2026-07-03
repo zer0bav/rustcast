@@ -48,6 +48,9 @@ pub enum Action {
     /// Send a signal to a PID (SIGTERM=15, SIGKILL=9). Handled GUI-side: the
     /// launcher stays open and re-queries so you can kill several in a row.
     Signal { pid: i32, signal: i32 },
+    /// Ask the registry to refresh its providers (e.g. trigger/retry the tldr
+    /// download) and re-query. Handled GUI-side; the window stays open.
+    Refresh,
     /// Do nothing (informational rows).
     None,
 }

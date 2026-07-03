@@ -4,6 +4,8 @@
 use crate::model::{Action, Item, SecondaryAction};
 use crate::provider::{ActionHint, Provider, QueryCtx, Tab};
 use fuzzy_matcher::FuzzyMatcher;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 
 #[derive(Clone)]
 pub struct DesktopApp {
@@ -14,7 +16,8 @@ pub struct DesktopApp {
     pub haystack: String,
 }
 
-pub fn load_apps() -> Vec<DesktopApp> {
+/// The XDG application directories, most-specific last (user overrides system).
+fn app_dirs() -> Vec<std::path::PathBuf> {
     let mut dirs: Vec<std::path::PathBuf> = vec![
         "/usr/share/applications".into(),
         "/usr/local/share/applications".into(),
@@ -27,6 +30,11 @@ pub fn load_apps() -> Vec<DesktopApp> {
             dirs.push(format!("{d}/applications").into());
         }
     }
+    dirs
+}
+
+pub fn load_apps() -> Vec<DesktopApp> {
+    let dirs = app_dirs();
     let mut apps = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for dir in dirs {
@@ -103,12 +111,35 @@ const APP_HINTS: &[ActionHint] = &[
 ];
 
 pub struct AppsProvider {
-    apps: Vec<DesktopApp>,
+    apps: Arc<RwLock<Vec<DesktopApp>>>,
+    refreshing: Arc<AtomicBool>,
 }
 
 impl AppsProvider {
+    /// Load the disk cache instantly, then kick a fresh background rescan so the
+    /// first window paint never blocks on hundreds of `.desktop` reads.
     pub fn new() -> Self {
-        AppsProvider { apps: load_apps() }
+        let apps = Arc::new(RwLock::new(load_cache()));
+        let p = AppsProvider { apps, refreshing: Arc::new(AtomicBool::new(false)) };
+        p.spawn_rescan();
+        p
+    }
+
+    /// Rescan the app dirs on a background thread, unless one is already running.
+    fn spawn_rescan(&self) {
+        if self.refreshing.swap(true, Ordering::SeqCst) {
+            return; // a rescan is already in flight
+        }
+        let apps = self.apps.clone();
+        let flag = self.refreshing.clone();
+        std::thread::spawn(move || {
+            let fresh = load_apps();
+            save_cache(&fresh);
+            if let Ok(mut w) = apps.write() {
+                *w = fresh;
+            }
+            flag.store(false, Ordering::SeqCst);
+        });
     }
 }
 
@@ -116,6 +147,62 @@ impl Default for AppsProvider {
     fn default() -> Self {
         AppsProvider::new()
     }
+}
+
+fn cache_path() -> Option<std::path::PathBuf> {
+    crate::config::Config::data_dir().map(|d| d.join("apps-index.tsv"))
+}
+
+/// Newest mtime across the app dirs, for staleness checks.
+fn dirs_mtime() -> Option<std::time::SystemTime> {
+    app_dirs()
+        .iter()
+        .filter_map(|d| std::fs::metadata(d).ok())
+        .filter_map(|m| m.modified().ok())
+        .max()
+}
+
+fn load_cache() -> Vec<DesktopApp> {
+    let Some(p) = cache_path() else { return Vec::new() };
+    let Ok(text) = std::fs::read_to_string(p) else { return Vec::new() };
+    text.lines()
+        .filter_map(|line| {
+            let mut it = line.split('\t');
+            let name = it.next()?.to_string();
+            let exec = it.next()?.to_string();
+            let icon = it.next().unwrap_or("").to_string();
+            let subtitle = it.next().unwrap_or("").to_string();
+            let haystack = it.next().unwrap_or("").to_string();
+            if name.is_empty() || exec.is_empty() {
+                return None;
+            }
+            Some(DesktopApp { name, exec, icon, subtitle, haystack })
+        })
+        .collect()
+}
+
+fn save_cache(apps: &[DesktopApp]) {
+    let Some(p) = cache_path() else { return };
+    if let Some(parent) = p.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    // Tabs/newlines never legitimately appear in these fields; sanitise anyway so
+    // the TSV can't be corrupted by a malformed .desktop value.
+    let clean = |s: &str| s.replace(['\t', '\n', '\r'], " ");
+    let mut buf = String::with_capacity(apps.len() * 64);
+    for a in apps {
+        buf.push_str(&clean(&a.name));
+        buf.push('\t');
+        buf.push_str(&clean(&a.exec));
+        buf.push('\t');
+        buf.push_str(&clean(&a.icon));
+        buf.push('\t');
+        buf.push_str(&clean(&a.subtitle));
+        buf.push('\t');
+        buf.push_str(&clean(&a.haystack));
+        buf.push('\n');
+    }
+    let _ = std::fs::write(p, buf);
 }
 
 impl Provider for AppsProvider {
@@ -131,10 +218,22 @@ impl Provider for AppsProvider {
     fn footer_hints(&self) -> &'static [ActionHint] {
         APP_HINTS
     }
+    fn refresh(&self) {
+        // Only rescan when the app dirs changed since the cache was written
+        // (a handful of stats), so this is cheap to call on every window show.
+        let stale = match (cache_path().and_then(|p| std::fs::metadata(p).ok().and_then(|m| m.modified().ok())), dirs_mtime()) {
+            (Some(cache_mt), Some(dir_mt)) => dir_mt > cache_mt,
+            _ => true, // no cache yet, or can't stat → rescan
+        };
+        if stale {
+            self.spawn_rescan();
+        }
+    }
     fn query(&self, ctx: &QueryCtx) -> Vec<Item> {
         let q = ctx.query;
+        let Ok(apps) = self.apps.read() else { return Vec::new() };
         let mut out = Vec::new();
-        for a in &self.apps {
+        for a in apps.iter() {
             let score = if q.is_empty() {
                 1
             } else {
@@ -163,5 +262,43 @@ impl Provider for AppsProvider {
             out.push(item);
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cache_line_roundtrips() {
+        // Simulate one TSV line and parse it back, including a value that
+        // contains a stray tab (must be sanitised to a space on save).
+        let a = DesktopApp {
+            name: "Firefox".into(),
+            exec: "firefox %u".into(),
+            icon: "firefox".into(),
+            subtitle: "Web\tBrowser".into(),
+            haystack: "firefox web browser".into(),
+        };
+        let clean = |s: &str| s.replace(['\t', '\n', '\r'], " ");
+        let line = format!(
+            "{}\t{}\t{}\t{}\t{}",
+            clean(&a.name), clean(&a.exec), clean(&a.icon), clean(&a.subtitle), clean(&a.haystack)
+        );
+        let mut it = line.split('\t');
+        assert_eq!(it.next().unwrap(), "Firefox");
+        assert_eq!(it.next().unwrap(), "firefox %u");
+        assert_eq!(it.next().unwrap(), "firefox");
+        assert_eq!(it.next().unwrap(), "Web Browser"); // tab became space
+        assert_eq!(it.next().unwrap(), "firefox web browser");
+        assert!(it.next().is_none());
+    }
+
+    #[test]
+    fn parse_desktop_skips_nodisplay() {
+        let hidden = "[Desktop Entry]\nType=Application\nName=X\nExec=x\nNoDisplay=true\n";
+        assert!(parse_desktop(hidden).is_none());
+        let ok = "[Desktop Entry]\nType=Application\nName=X\nExec=x\n";
+        assert!(parse_desktop(ok).is_some());
     }
 }

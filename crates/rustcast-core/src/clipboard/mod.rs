@@ -67,6 +67,22 @@ fn row_to_item(r: &ClipRow) -> Item {
         prev
     };
 
+    let mut actions = vec![
+        SecondaryAction {
+            label: if r.pinned { "Unpin".into() } else { "Pin".into() },
+            action: Action::ClipPin(r.id),
+        },
+        SecondaryAction { label: "Delete".into(), action: Action::ClipDelete(r.id) },
+        SecondaryAction { label: "Copy preview text".into(), action: Action::Copy(r.preview.clone()) },
+    ];
+    // Images can be run through OCR (tesseract) and the extracted text copied.
+    if is_image && !r.blob_path.is_empty() {
+        actions.push(SecondaryAction {
+            label: "Extract text (OCR)".into(),
+            action: Action::RunShell(ocr_command(&r.blob_path)),
+        });
+    }
+
     Item::new(
         title,
         meta,
@@ -76,14 +92,18 @@ fn row_to_item(r: &ClipRow) -> Item {
         action,
     )
     .with_prev(prev)
-    .with_actions(vec![
-        SecondaryAction {
-            label: if r.pinned { "Unpin".into() } else { "Pin".into() },
-            action: Action::ClipPin(r.id),
-        },
-        SecondaryAction { label: "Delete".into(), action: Action::ClipDelete(r.id) },
-        SecondaryAction { label: "Copy preview text".into(), action: Action::Copy(r.preview.clone()) },
-    ])
+    .with_actions(actions)
+}
+
+/// Shell command that OCRs `path` with tesseract and copies the result to the
+/// clipboard (wl-copy or xclip). Best-effort — no-op if tesseract is absent.
+fn ocr_command(path: &str) -> String {
+    let p = crate::action::shell_quote(path);
+    format!(
+        "t=$(tesseract {p} stdout 2>/dev/null); \
+         if command -v wl-copy >/dev/null 2>&1; then printf '%s' \"$t\" | wl-copy; \
+         elif command -v xclip >/dev/null 2>&1; then printf '%s' \"$t\" | xclip -selection clipboard; fi"
+    )
 }
 
 impl Provider for ClipboardProvider {

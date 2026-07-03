@@ -117,6 +117,28 @@ pub struct Snippet {
     pub name: String,
 }
 
+/// A short trigger word that launches an app, opens a URL, or runs a command —
+/// e.g. `ff` → Firefox. Raycast-style aliases.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Alias {
+    /// The trigger word typed in the box (e.g. "ff").
+    pub keyword: String,
+    /// What it does: an exec line, a URL, or a shell command (per `kind`).
+    pub target: String,
+    /// Display name; defaults to `target` when empty.
+    #[serde(default)]
+    pub name: String,
+    /// "launch" (default), "url", or "shell".
+    #[serde(default = "alias_kind_launch")]
+    pub kind: String,
+    #[serde(default)]
+    pub icon: String,
+}
+
+fn alias_kind_launch() -> String {
+    "launch".into()
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
 #[serde(default)]
 pub struct Config {
@@ -131,6 +153,8 @@ pub struct Config {
     pub quicklinks: Vec<Quicklink>,
     #[serde(rename = "snippets", skip_serializing_if = "Vec::is_empty")]
     pub snippets: Vec<Snippet>,
+    #[serde(rename = "aliases", skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<Alias>,
 }
 
 impl Config {

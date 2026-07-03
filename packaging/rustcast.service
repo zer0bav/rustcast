@@ -1,0 +1,16 @@
+[Unit]
+Description=rustcast launcher (resident daemon)
+Documentation=https://github.com/zer0bav/rustcast
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+# Start resident and hidden so the first hotkey press shows the window instantly.
+Type=simple
+ExecStart=%h/.local/bin/rustcast --daemon
+ExecStop=%h/.local/bin/rustcast --quit
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

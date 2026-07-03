@@ -41,6 +41,79 @@ struct State {
     mode: RefCell<Option<(String, String)>>,
     /// Pinned favorites, shared live with the registry's `PinsProvider`.
     pins: rustcast_core::pins::PinList,
+    /// Usage/recency ranking, shared with the registry.
+    frecency: Rc<RefCell<rustcast_core::frecency::Frecency>>,
+    /// Resident (daemon) vs one-shot: decides whether "close" hides or destroys.
+    resident: bool,
+    /// Reusable result-row widgets. Rows are updated in place per keystroke
+    /// instead of destroyed+recreated, and only the head `attached` of them are
+    /// in the ListBox at any time.
+    row_pool: RefCell<Vec<RowWidget>>,
+    /// How many pooled rows are currently attached to the ListBox.
+    attached: Cell<usize>,
+}
+
+/// One reusable result row: the outer row plus the widgets we mutate per query.
+struct RowWidget {
+    row: ListBoxRow,
+    icon: Image,
+    title: Label,
+    sub: Label,
+    tag: Label,
+    /// Live drag source for file rows; removed/re-added as the row is reused.
+    drag: RefCell<Option<gtk4::DragSource>>,
+}
+
+/// Hide the window in resident mode, or close it (quitting) in one-shot mode.
+fn dismiss(state: &Rc<State>, win: &ApplicationWindow) {
+    if state.resident {
+        win.set_visible(false);
+    } else {
+        win.close();
+    }
+}
+
+/// What a (possibly forwarded) invocation asks the resident instance to do.
+enum Invocation {
+    /// Show/toggle the window, optionally on a tab / with a pre-filled query.
+    Show { tab: Option<String>, query: Option<String> },
+    /// Build the window but stay hidden (autostart pre-warm).
+    Daemon,
+    /// Quit the resident instance.
+    Quit,
+}
+
+/// Parse a flat argument list (own argv, or a forwarded one) into an invocation.
+fn parse_invocation(args: &[String]) -> Invocation {
+    if args.iter().any(|a| a == "--quit") {
+        return Invocation::Quit;
+    }
+    if args.iter().any(|a| a == "--daemon") {
+        return Invocation::Daemon;
+    }
+    let mut tab = args
+        .iter()
+        .position(|a| a == "--tab")
+        .and_then(|i| args.get(i + 1).cloned());
+    let mut query = args
+        .iter()
+        .position(|a| a == "--query")
+        .and_then(|i| args.get(i + 1).cloned());
+    if tab.is_none() {
+        match std::env::var("RUSTCAST_MODE").as_deref() {
+            Ok("clipboard") | Ok("clip") | Ok("cb") => tab = Some("clipboard".into()),
+            Ok("files") | Ok("file") => tab = Some("files".into()),
+            Ok("cyber") => tab = Some("cyber".into()),
+            Ok("calc") => {
+                tab = Some("apps".into());
+                if query.is_none() {
+                    query = Some("=".into());
+                }
+            }
+            _ => {}
+        }
+    }
+    Invocation::Show { tab, query }
 }
 
 fn main() {
@@ -71,83 +144,97 @@ fn main() {
             "rustcast — a Raycast-class launcher for Linux\n\n\
              USAGE:\n  rustcast [--tab <name>] [--query <text>]\n\n\
              FLAGS:\n\
-             \x20 --tab <apps|clipboard|files|cyber|cheat|extensions>  open on a tab\n\
+             \x20 --tab <apps|clipboard|files|cyber|cheat|windows|extensions>  open on a tab\n\
              \x20 --query <text>   pre-fill the search box\n\
+             \x20 --daemon         start resident, hidden (for autostart)\n\
+             \x20 --quit           stop the resident instance\n\
+             \x20 --no-daemon      one-shot mode (no resident process)\n\
              \x20 --version        print version\n\
              \x20 --help           show this help\n\n\
-             Bind these to a global hotkey in your compositor/desktop settings.\n"
+             rustcast runs as a single resident process: bind `rustcast` to a\n\
+             global hotkey and it toggles the window instantly. Pass --tab to\n\
+             open straight onto a tab (e.g. Super+V → `rustcast --tab clipboard`).\n"
         );
         return;
     }
 
-    // Optional `--tab <name>` to open straight into a tab (e.g. Super+V → clipboard).
-    // Falls back to the legacy `RUSTCAST_MODE` env var for backwards compatibility.
-    let mut start_tab: Option<String> = args
-        .iter()
-        .position(|a| a == "--tab")
-        .and_then(|i| args.get(i + 1).cloned());
-    // Optional `--query <text>` to pre-fill the search.
-    let mut start_query: Option<String> = args
-        .iter()
-        .position(|a| a == "--query")
-        .and_then(|i| args.get(i + 1).cloned());
-
-    if start_tab.is_none() {
-        match std::env::var("RUSTCAST_MODE").as_deref() {
-            Ok("clipboard") | Ok("clip") | Ok("cb") => start_tab = Some("clipboard".into()),
-            Ok("files") | Ok("file") => start_tab = Some("files".into()),
-            Ok("cyber") => start_tab = Some("cyber".into()),
-            Ok("calc") => {
-                start_tab = Some("apps".into());
-                if start_query.is_none() {
-                    start_query = Some("=".into());
-                }
-            }
-            _ => {}
-        }
+    // Escape hatch: one-shot mode (old behaviour) for compositors where the
+    // layer-shell hide/show cycle misbehaves.
+    if args.iter().any(|a| a == "--no-daemon") {
+        run_oneshot(parse_invocation(&args));
+        return;
     }
 
-    // Toggle behaviour without a fragile `pkill -f` in the keybind (which would
-    // match — and kill — its own launching shell): close any other GUI instance
-    // from inside the process, where we can exclude our own pid and the daemon.
-    kill_other_guis();
+    run_daemon();
+}
 
-    // NON_UNIQUE: every invocation is its own process, so a running instance
-    // never swallows a new launch's --tab/--query args.
+/// Resident single-instance mode: the first `rustcast` builds the window and
+/// holds the process alive; every later `rustcast` forwards its argv to this
+/// instance (over D-Bus) and returns, toggling the window with zero cold-start.
+fn run_daemon() {
+    let app = Application::builder()
+        .application_id(APP_ID)
+        .flags(gtk4::gio::ApplicationFlags::HANDLES_COMMAND_LINE)
+        .build();
+
+    // Built lazily on the first command line, then reused for the process life.
+    let ui_cell: Rc<RefCell<Option<Rc<Ui>>>> = Rc::new(RefCell::new(None));
+
+    app.connect_command_line(move |app, cmdline| {
+        let args: Vec<String> = cmdline
+            .arguments()
+            .into_iter()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect();
+        match parse_invocation(&args) {
+            Invocation::Quit => {
+                app.quit();
+            }
+            Invocation::Daemon => {
+                // Pre-warm: build the window but leave it hidden.
+                let mut cell = ui_cell.borrow_mut();
+                if cell.is_none() {
+                    *cell = Some(build_ui(app, true));
+                }
+            }
+            Invocation::Show { tab, query } => {
+                let ui = {
+                    let mut cell = ui_cell.borrow_mut();
+                    if cell.is_none() {
+                        *cell = Some(build_ui(app, true));
+                    }
+                    cell.as_ref().unwrap().clone()
+                };
+                // Same hotkey while open (no explicit tab/query) → hide.
+                if ui.window.is_visible() && tab.is_none() && query.is_none() {
+                    ui.hide();
+                } else {
+                    ui.show_with(tab, query);
+                }
+            }
+        }
+        0
+    });
+
+    app.run();
+}
+
+/// One-shot fallback (`--no-daemon`): behave like the pre-daemon build — a fresh
+/// process that closes on Escape / focus loss.
+fn run_oneshot(inv: Invocation) {
+    let (tab, query) = match inv {
+        Invocation::Show { tab, query } => (tab, query),
+        _ => (None, None),
+    };
     let app = Application::builder()
         .application_id(APP_ID)
         .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
-    // GTK would treat our flags as its own args; hand it nothing.
-    app.connect_activate(move |a| build_ui(a, start_tab.clone(), start_query.clone()));
+    app.connect_activate(move |a| {
+        let ui = build_ui(a, false);
+        ui.show_with(tab.clone(), query.clone());
+    });
     app.run_with_args::<String>(&[]);
-}
-
-/// Terminate any other running rustcast **GUI** instance (so pressing the
-/// keybind again re-opens fresh), while leaving the clipboard daemon and our own
-/// process alone.
-fn kill_other_guis() {
-    let Ok(self_exe) = std::env::current_exe() else { return };
-    let self_pid = std::process::id();
-    let Ok(entries) = std::fs::read_dir("/proc") else { return };
-    for e in entries.flatten() {
-        let Ok(pid) = e.file_name().to_string_lossy().parse::<u32>() else { continue };
-        if pid == self_pid {
-            continue;
-        }
-        // only processes running our exact binary
-        match std::fs::read_link(format!("/proc/{pid}/exe")) {
-            Ok(exe) if exe == self_exe => {}
-            _ => continue,
-        }
-        let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
-        let cmdline = String::from_utf8_lossy(&cmdline);
-        // leave the background daemon / ingest helpers running
-        if cmdline.contains("--clip-daemon") || cmdline.contains("--clip-ingest") {
-            continue;
-        }
-        let _ = std::process::Command::new("kill").arg(pid.to_string()).status();
-    }
 }
 
 /// Spawn the two `wl-paste --watch` processes that feed the clipboard store.
@@ -215,9 +302,35 @@ fn tab_from_config(s: &str) -> Tab {
     }
 }
 
-fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<String>) {
+/// The whole launcher UI, built once and kept resident. `show_with`/`hide`
+/// toggle visibility so a hotkey press never pays GTK/registry startup cost.
+struct Ui {
+    window: ApplicationWindow,
+    entry: Entry,
+    state: Rc<State>,
+    switch_tab: Rc<dyn Fn(Tab)>,
+    /// Whether this instance stays resident (daemon) or closes on hide.
+    resident: bool,
+    /// True when the window is a wlr-layer-shell surface.
+    layer: bool,
+    /// Default tab (from config) used when no `--tab` is given.
+    default_tab: Cell<Tab>,
+    /// mtime of the config file at last load, to detect edits between shows.
+    cfg_mtime: Cell<Option<std::time::SystemTime>>,
+    /// Keeps the GApplication alive across hide/show in resident mode. Dropping
+    /// this releases the app, so it must live as long as the `Ui`.
+    _hold: Option<gtk4::gio::ApplicationHoldGuard>,
+}
+
+fn config_mtime() -> Option<std::time::SystemTime> {
+    Config::config_path()
+        .and_then(|p| std::fs::metadata(p).ok())
+        .and_then(|m| m.modified().ok())
+}
+
+fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
     let cfg = Config::load();
-    let initial_tab = tab_from_config(start_tab.as_deref().unwrap_or(&cfg.general.default_tab));
+    let initial_tab = tab_from_config(&cfg.general.default_tab);
 
     // Native clipboard store + background watcher daemon.
     let clip_store = if cfg.clipboard.enabled {
@@ -225,15 +338,26 @@ fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<St
     } else {
         None
     };
-    if let Some(store) = &clip_store {
-        let _ = store.prune(cfg.clipboard.max_entries);
-        ensure_clip_daemon();
+    // Defer the non-critical clipboard startup work (prune + spawn watcher) off
+    // the pre-present path so the first paint is instant.
+    if clip_store.is_some() {
+        let store = clip_store.clone();
+        let cap = cfg.clipboard.max_entries;
+        glib::idle_add_local_once(move || {
+            if let Some(store) = &store {
+                let _ = store.prune(cap);
+            }
+            ensure_clip_daemon();
+        });
     }
 
     let pins: rustcast_core::pins::PinList =
         Rc::new(RefCell::new(rustcast_core::pins::load()));
+    let frecency = Rc::new(RefCell::new(rustcast_core::frecency::Frecency::load()));
+    let mut registry = rustcast_core::default_registry(&cfg, clip_store.clone(), pins.clone());
+    registry.set_frecency(frecency.clone());
     let state = Rc::new(State {
-        registry: RefCell::new(rustcast_core::default_registry(&cfg, clip_store.clone(), pins.clone())),
+        registry: RefCell::new(registry),
         matcher: ranking::matcher(),
         items: RefCell::new(Vec::new()),
         active_tab: Cell::new(initial_tab),
@@ -246,6 +370,10 @@ fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<St
         clip_store,
         mode: RefCell::new(None),
         pins,
+        frecency,
+        resident,
+        row_pool: RefCell::new(Vec::new()),
+        attached: Cell::new(0),
     });
 
     let window = ApplicationWindow::builder()
@@ -265,14 +393,19 @@ fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<St
         window.set_keyboard_mode(KeyboardMode::Exclusive);
     } else {
         window.set_decorated(false);
-        // close when the launcher loses focus (once it has been focused)
+        // Hide (resident) or close (one-shot) when the launcher loses focus,
+        // once it has been focused.
         let seen_active = std::cell::Cell::new(false);
         let win_close = window.clone();
         window.connect_is_active_notify(move |w| {
             if w.is_active() {
                 seen_active.set(true);
             } else if seen_active.get() {
-                win_close.close();
+                if resident {
+                    w.set_visible(false);
+                } else {
+                    win_close.close();
+                }
             }
         });
     }
@@ -473,9 +606,6 @@ fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<St
         let list = list.clone();
         let update_preview = update_preview.clone();
         move |query: &str| {
-            while let Some(c) = list.first_child() {
-                list.remove(&c);
-            }
             let tab = state.active_tab.get();
             let target = state.target.borrow();
             let mode = state.mode.borrow();
@@ -485,8 +615,25 @@ fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<St
             drop(mode);
             drop(target);
 
-            for it in &collected {
-                list.append(&build_row(it));
+            // Reuse pooled row widgets: update the first N in place, attach any
+            // we're missing, and detach the surplus — no per-keystroke teardown.
+            {
+                let mut pool = state.row_pool.borrow_mut();
+                let attached = state.attached.get();
+                let n = collected.len();
+                for (i, it) in collected.iter().enumerate() {
+                    if i >= pool.len() {
+                        pool.push(make_row());
+                    }
+                    if i >= attached {
+                        list.append(&pool[i].row);
+                    }
+                    update_row(&pool[i], it);
+                }
+                for i in n..attached {
+                    list.remove(&pool[i].row);
+                }
+                state.attached.set(n);
             }
             *state.items.borrow_mut() = collected;
             if let Some(first) = list.row_at_index(0) {
@@ -523,6 +670,7 @@ fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<St
             rebuild_footer();
         }
     };
+    let switch_tab: Rc<dyn Fn(Tab)> = Rc::new(switch_tab);
 
     for (i, b) in tab_buttons.iter().enumerate() {
         let switch_tab = switch_tab.clone();
@@ -580,7 +728,7 @@ fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<St
                     } else if !entry.text().is_empty() {
                         entry.set_text("");
                     } else {
-                        win.close();
+                        dismiss(&state, &win);
                     }
                     Propagation::Stop
                 }
@@ -650,37 +798,112 @@ fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<St
         window.add_controller(key);
     }
 
-    // Live clipboard refresh: while the Clipboard tab is open, pick up newly
-    // copied entries without needing a keystroke.
-    if state.clip_store.is_some() {
+    // Live refresh ticker (700 ms): while the Clipboard tab is open, pick up
+    // newly copied entries; while the Cheat tab is open and a tldr download is
+    // running, repaint when it finishes — both without needing a keystroke.
+    {
         let state = state.clone();
         let entry_r = entry.clone();
         let rebuild_r = rebuild.clone();
         let last_id = std::cell::Cell::new(
             state.clip_store.as_ref().and_then(|s| s.recent(1).first().map(|r| r.id)).unwrap_or(-1),
         );
+        let was_downloading = std::cell::Cell::new(false);
         glib::timeout_add_local(std::time::Duration::from_millis(700), move || {
-            if state.active_tab.get() == Tab::Clipboard {
-                if let Some(store) = &state.clip_store {
-                    let newest = store.recent(1).first().map(|r| r.id).unwrap_or(-1);
-                    if newest != last_id.get() {
-                        last_id.set(newest);
+            match state.active_tab.get() {
+                Tab::Clipboard => {
+                    if let Some(store) = &state.clip_store {
+                        let newest = store.recent(1).first().map(|r| r.id).unwrap_or(-1);
+                        if newest != last_id.get() {
+                            last_id.set(newest);
+                            rebuild_r(&entry_r.text());
+                        }
+                    }
+                }
+                Tab::Cheat => {
+                    // Repaint once when the download starts and once when it ends
+                    // so the "Downloading…" row and the results both appear live.
+                    let now = rustcast_core::tldr::downloading();
+                    if now != was_downloading.get() {
+                        was_downloading.set(now);
                         rebuild_r(&entry_r.text());
                     }
                 }
+                _ => {}
             }
             glib::ControlFlow::Continue
         });
     }
 
-    // initial paint
-    switch_tab(initial_tab);
-    if let Some(q) = start_query {
-        entry.set_text(&q);
-        entry.set_position(-1);
+    // Keep the process alive across hide/show in resident mode. The guard must
+    // be stored — dropping it releases the application.
+    let _hold = if resident { Some(app.hold()) } else { None };
+    let _ = &rebuild; // kept alive by the closures; not needed on the struct
+    Rc::new(Ui {
+        window,
+        entry,
+        state,
+        switch_tab,
+        resident,
+        layer,
+        default_tab: Cell::new(initial_tab),
+        cfg_mtime: Cell::new(config_mtime()),
+        _hold,
+    })
+}
+
+impl Ui {
+    /// Present the window fresh: reload config if it changed, reset mode/target,
+    /// switch to the requested (or default) tab, pre-fill the query, refresh the
+    /// background indexes, and grab focus.
+    fn show_with(&self, tab: Option<String>, query: Option<String>) {
+        // Reload config + rebuild the registry if the file changed since we last
+        // looked (so edits apply without a restart).
+        let mt = config_mtime();
+        if mt != self.cfg_mtime.get() {
+            self.cfg_mtime.set(mt);
+            let cfg = Config::load();
+            self.default_tab.set(tab_from_config(&cfg.general.default_tab));
+            let mut reg =
+                rustcast_core::default_registry(&cfg, self.state.clip_store.clone(), self.state.pins.clone());
+            reg.set_frecency(self.state.frecency.clone());
+            *self.state.registry.borrow_mut() = reg;
+        }
+
+        // Reset any command mode / target back to a clean root.
+        *self.state.mode.borrow_mut() = None;
+        self.entry.remove_css_class("mode-active");
+
+        let target_tab = tab.map(|t| tab_from_config(&t)).unwrap_or_else(|| self.default_tab.get());
+        (self.switch_tab)(target_tab);
+
+        match query {
+            Some(q) => {
+                self.entry.set_text(&q);
+                self.entry.set_position(-1);
+            }
+            None => self.entry.set_text(""),
+        }
+
+        // Kick background index refreshes (apps/files/tldr) for this show.
+        self.state.registry.borrow().refresh_all();
+
+        // Re-assert layer-shell keyboard focus before each present (older
+        // gtk4-layer-shell can drop it across an unmap/remap cycle).
+        if self.layer {
+            self.window.set_keyboard_mode(KeyboardMode::Exclusive);
+        }
+        self.entry.grab_focus();
+        self.window.present();
     }
-    entry.grab_focus();
-    window.present();
+
+    fn hide(&self) {
+        if self.resident {
+            self.window.set_visible(false);
+        } else {
+            self.window.close();
+        }
+    }
 }
 
 /// Run the selected item's primary action.
@@ -744,8 +967,10 @@ fn apply_action(
             // Save to config, then reload the registry so it works immediately.
             if Config::append_quicklink(name, template, kind).is_ok() {
                 let cfg = Config::load();
-                *state.registry.borrow_mut() =
+                let mut reg =
                     rustcast_core::default_registry(&cfg, state.clip_store.clone(), state.pins.clone());
+                reg.set_frecency(state.frecency.clone());
+                *state.registry.borrow_mut() = reg;
             }
             // Leave the add mode; the new quicklink is now live.
             *state.mode.borrow_mut() = None;
@@ -761,9 +986,18 @@ fn apply_action(
             // Edit the config in place, then reload so the change shows now.
             if Config::set_value(section, key, value).is_ok() {
                 let cfg = Config::load();
-                *state.registry.borrow_mut() =
+                let mut reg =
                     rustcast_core::default_registry(&cfg, state.clip_store.clone(), state.pins.clone());
+                reg.set_frecency(state.frecency.clone());
+                *state.registry.borrow_mut() = reg;
             }
+            rebuild(&entry.text());
+            return;
+        }
+        Action::Refresh => {
+            // Trigger provider refresh (e.g. start/retry the tldr download) and
+            // re-query so progress/results appear.
+            state.registry.borrow().refresh_all();
             rebuild(&entry.text());
             return;
         }
@@ -806,13 +1040,29 @@ fn apply_action(
                 }
                 rustcast_core::action::open(&path.to_string_lossy());
             }
-            win.close();
+            dismiss(state, win);
             return;
         }
         _ => {}
     }
+    // Record usage for launch-like actions so frequently-used items float up
+    // (never for high-churn Copy — clipboard/tldr copies would pollute it).
+    if matches!(
+        action,
+        Action::Launch(_)
+            | Action::OpenUrl(_)
+            | Action::OpenFile(_)
+            | Action::RunShell(_)
+            | Action::RunInTerminal(_)
+            | Action::EnterMode { .. }
+    ) {
+        if let Some(k) = rustcast_core::pins::pin_key(action) {
+            state.frecency.borrow_mut().record(&k);
+            state.frecency.borrow().save();
+        }
+    }
     if do_action(action, &state.env) {
-        win.close();
+        dismiss(state, win);
     }
 }
 
@@ -911,54 +1161,64 @@ fn open_actions_menu(
     popover.popup();
 }
 
-/// Build one result row widget.
-fn build_row(it: &Item) -> ListBoxRow {
+/// Build one empty, reusable result row. Content is filled by [`update_row`].
+fn make_row() -> RowWidget {
     let row = ListBoxRow::new();
     let hb = GtkBox::new(Orientation::Horizontal, 12);
     hb.add_css_class("row-inner");
-    let img = if it.icon.starts_with('/') {
-        Image::from_file(&it.icon)
-    } else if it.icon.is_empty() {
-        Image::new()
-    } else {
-        Image::from_icon_name(&it.icon)
-    };
-    img.set_pixel_size(26);
+    let icon = Image::new();
+    icon.set_pixel_size(26);
     let tb = GtkBox::new(Orientation::Vertical, 0);
     tb.set_hexpand(true);
-    let title = Label::builder()
-        .label(&it.title)
-        .xalign(0.0)
-        .ellipsize(gtk4::pango::EllipsizeMode::End)
-        .build();
+    let title = Label::builder().xalign(0.0).ellipsize(gtk4::pango::EllipsizeMode::End).build();
     title.add_css_class("app-title");
+    let sub = Label::builder().xalign(0.0).ellipsize(gtk4::pango::EllipsizeMode::End).build();
+    sub.add_css_class("app-sub");
     tb.append(&title);
-    if !it.subtitle.is_empty() {
-        let sub = Label::builder()
-            .label(&it.subtitle)
-            .xalign(0.0)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .build();
-        sub.add_css_class("app-sub");
-        tb.append(&sub);
-    }
-    let tag = Label::builder().label(&it.tag).xalign(1.0).valign(Align::Center).build();
+    tb.append(&sub);
+    let tag = Label::builder().xalign(1.0).valign(Align::Center).build();
     tag.add_css_class("app-tag");
-    hb.append(&img);
+    hb.append(&icon);
     hb.append(&tb);
     hb.append(&tag);
     row.set_child(Some(&hb));
-
-    // Drag-out: file results can be dragged into other apps as a real file.
-    if let Action::OpenFile(p) = &it.action {
-        attach_file_drag(&row, p);
-    }
-    row
+    RowWidget { row, icon, title, sub, tag, drag: RefCell::new(None) }
 }
 
-/// Attach a GTK4 drag source that exports `path` as a draggable file
-/// (advertises both the GTK file-list type and `text/uri-list`).
-fn attach_file_drag(row: &ListBoxRow, path: &str) {
+/// Update a pooled row to show `it` — mutates labels/icon in place instead of
+/// rebuilding widgets, and swaps the file drag-source as needed.
+fn update_row(rw: &RowWidget, it: &Item) {
+    if it.icon.starts_with('/') {
+        rw.icon.set_from_file(Some(&it.icon));
+    } else if it.icon.is_empty() {
+        rw.icon.clear();
+    } else {
+        rw.icon.set_icon_name(Some(&it.icon));
+    }
+    rw.title.set_text(&it.title);
+    if it.subtitle.is_empty() {
+        rw.sub.set_visible(false);
+    } else {
+        rw.sub.set_text(&it.subtitle);
+        rw.sub.set_visible(true);
+    }
+    rw.tag.set_text(&it.tag);
+
+    // Drag-out: file results can be dragged into other apps as a real file.
+    // Remove any drag source left from a previous item this row showed.
+    if let Some(old) = rw.drag.borrow_mut().take() {
+        rw.row.remove_controller(&old);
+    }
+    if let Action::OpenFile(p) = &it.action {
+        let src = file_drag_source(p);
+        rw.row.add_controller(src.clone());
+        *rw.drag.borrow_mut() = Some(src);
+    }
+}
+
+/// A GTK4 drag source that exports `path` as a draggable file (advertises both
+/// the GTK file-list type and `text/uri-list`).
+fn file_drag_source(path: &str) -> gtk4::DragSource {
     use gtk4::gdk;
     let src = gtk4::DragSource::new();
     src.set_actions(gdk::DragAction::COPY);
@@ -974,7 +1234,7 @@ fn attach_file_drag(row: &ListBoxRow, path: &str) {
         );
         Some(gdk::ContentProvider::new_union(&[by_files, by_uri]))
     });
-    row.add_controller(src);
+    src
 }
 
 /// Render lightweight Markdown to Pango markup for the preview label: headers

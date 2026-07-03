@@ -50,6 +50,13 @@ const COMMANDS: &[Command] = &[
         mode: "gen",
     },
     Command {
+        title: "Search tldr",
+        subtitle: "10k+ community command examples (tar, ssh, curl…)",
+        icon: "utilities-terminal",
+        keywords: "tldr man help example command reference cli how do i",
+        mode: "tldr",
+    },
+    Command {
         title: "Search Cheatsheets",
         subtitle: "command references (nmap, tmux, vim, curl…)",
         icon: "accessories-dictionary",

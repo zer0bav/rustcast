@@ -8,7 +8,7 @@ animations = true
 # theme = "/path/to/custom/style.css"   # else ~/.config/rustcast/style.css, else bundled
 
 [general]
-default_tab = "apps"          # apps | clipboard | files | cyber | cheat | extensions
+default_tab = "apps"          # apps | clipboard | files | cyber | cheat | windows | extensions
 terminal = "kitty -e"         # auto-detected if omitted
 
 [clipboard]
@@ -49,14 +49,44 @@ name = "grep"
 kind = "shell"
 template = "rg {query} ~"
 
-# ── Snippets (Phase 5) ──────────────────────────────────────
+# ── Aliases ─────────────────────────────────────────────────
+# Short trigger words that stand in for an app, URL, or command. Type the
+# keyword and it jumps to the top of the root list.
+#   kind = "launch" (default, runs an app Exec line) | "url" | "shell"
+
+# [[aliases]]
+# keyword = "ff"
+# name = "Firefox"
+# target = "firefox"
+
+# [[aliases]]
+# keyword = "mail"
+# kind = "url"
+# target = "https://mail.google.com"
+
+# ── Snippets ────────────────────────────────────────────────
+# Trigger by keyword from the Apps tab; activating copies the text.
+# Tokens expand on use: {date} {time} {datetime} {clipboard}.
 # [[snippets]]
 # keyword = "sig"
 # name = "Email signature"
 # text = "Best,\nzer0bav"
 
-# ── Cheatsheets ─────────────────────────────────────────────
-# The Cheats tab bundles curated references (nmap, tmux, vim, curl, gdb,
+# [[snippets]]
+# keyword = "wrap"
+# name = "Wrap clipboard in code fence"
+# text = "```\n{clipboard}\n```"
+
+# ── Cheats tab: tldr + cheatsheets ──────────────────────────
+# The Cheats tab searches the official tldr-pages (10k+ community command
+# examples). It downloads the ~5 MB English archive to
+# ~/.local/share/rustcast/tldr/ the first time you use it (Enter on the
+# "Download tldr pages" row) and works fully offline after that. Each example
+# is its own row: Enter copies just that command (placeholders stripped),
+# Ctrl+K offers "copy with {{placeholders}}", "run in terminal", "open page".
+# Needs curl (or wget) + bsdtar (or unzip) once, for the download.
+#
+# The same tab also bundles curated cheatsheets (nmap, tmux, vim, curl, gdb,
 # hashcat, sqlmap, linux-privesc…). Drop your own Markdown/text files into
 # ~/.config/rustcast/cheatsheets/ and they show up automatically — the file
 # name becomes the title. No config needed.

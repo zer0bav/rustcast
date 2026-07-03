@@ -3,8 +3,10 @@
 //! Replaces the hardcoded provider dispatch that used to live inside the GUI's
 //! `rebuild` closure.
 
-use crate::model::Item;
+use crate::model::{Action, Item};
 use crate::provider::{ActionHint, Provider, QueryCtx, Tab};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub const MAX_RESULTS: usize = 80;
 
@@ -17,15 +19,31 @@ const DEFAULT_HINTS: &[ActionHint] = &[
 
 pub struct Registry {
     providers: Vec<Box<dyn Provider>>,
+    /// Usage-based boost applied to items on the Apps root. Optional so headless
+    /// tests can build a registry without it.
+    frecency: Option<Rc<RefCell<crate::frecency::Frecency>>>,
 }
 
 impl Registry {
     pub fn new() -> Self {
-        Registry { providers: Vec::new() }
+        Registry { providers: Vec::new(), frecency: None }
     }
 
     pub fn register(&mut self, p: Box<dyn Provider>) {
         self.providers.push(p);
+    }
+
+    /// Attach the shared frecency store so tab-routed results get a recency/usage
+    /// boost. Re-called whenever the registry is rebuilt.
+    pub fn set_frecency(&mut self, f: Rc<RefCell<crate::frecency::Frecency>>) {
+        self.frecency = Some(f);
+    }
+
+    /// Refresh every provider's cached/background state (daemon window-show hook).
+    pub fn refresh_all(&self) {
+        for p in &self.providers {
+            p.refresh();
+        }
     }
 
     /// Find a provider whose prefix begins `raw` (followed by end or space).
@@ -94,12 +112,52 @@ impl Registry {
                     collected.extend(p.query(&ctx));
                 }
             }
+            // Usage/recency boost — only for the normal tab route (never inside a
+            // command mode or prefix tool, where reordering by history would be
+            // confusing, e.g. the kill-process list).
+            if let Some(fr) = &self.frecency {
+                let fr = fr.borrow();
+                let now = crate::frecency::now_unix();
+                for it in &mut collected {
+                    if let Some(k) = crate::pins::pin_key(&it.action) {
+                        it.score += fr.boost(&k, now);
+                    }
+                }
+            }
+            // Nothing matched an Apps-tab query → offer to search the web.
+            if collected.is_empty() && active_tab == Tab::Apps && !query.is_empty() {
+                collected.extend(web_fallback(query));
+            }
         }
 
         collected.sort_by(|a, b| b.score.cmp(&a.score));
         collected.truncate(MAX_RESULTS);
         collected
     }
+}
+
+/// Two "search the web for <q>" rows, shown only when an Apps-tab query returns
+/// no local results. `OpenUrl` opens the default browser via `xdg-open`.
+fn web_fallback(query: &str) -> Vec<Item> {
+    let enc = urlencoding::encode(query);
+    vec![
+        Item::new(
+            format!("Search Google for \u{201c}{query}\u{201d}"),
+            "open in your browser",
+            "web-browser",
+            "web",
+            10,
+            Action::OpenUrl(format!("https://www.google.com/search?q={enc}")),
+        ),
+        Item::new(
+            format!("Search DuckDuckGo for \u{201c}{query}\u{201d}"),
+            "open in your browser",
+            "web-browser",
+            "web",
+            9,
+            Action::OpenUrl(format!("https://duckduckgo.com/?q={enc}")),
+        ),
+    ]
 }
 
 impl Default for Registry {

@@ -1,5 +1,6 @@
-//! Inline calculator provider. Shells to `qalc -t`. Kept synchronous for now
-//! (matches the prototype); a debounced async path is a later refinement.
+//! Inline calculator provider. Prefers `qalc -t` when installed; otherwise falls
+//! back to a built-in evaluator ([`crate::eval`]) that also handles unit and
+//! currency conversion, so the calculator works with no external tools.
 
 use crate::config::which;
 use crate::model::{Action, Item, Prev};
@@ -7,12 +8,13 @@ use crate::provider::{Provider, QueryCtx, Tab};
 use std::process::Command;
 
 pub struct CalcProvider {
-    available: bool,
+    /// Whether `qalc` is on PATH (preferred backend).
+    qalc: bool,
 }
 
 impl CalcProvider {
     pub fn new() -> Self {
-        CalcProvider { available: which("qalc") }
+        CalcProvider { qalc: which("qalc") }
     }
 }
 
@@ -33,21 +35,21 @@ impl Provider for CalcProvider {
         Some("=")
     }
     fn query(&self, ctx: &QueryCtx) -> Vec<Item> {
-        if !self.available {
-            return Vec::new();
-        }
         let raw = ctx.raw.trim();
+        let has_prefix = raw.starts_with('=');
         let expr = raw.strip_prefix('=').unwrap_or(raw).trim();
         let looks_math = expr.chars().any(|c| c.is_ascii_digit())
             && expr.chars().any(|c| "+-*/^%(".contains(c));
-        if expr.is_empty() || (!looks_math && !raw.starts_with('=')) {
+        let looks_convert = expr.contains(" in ") || expr.contains(" to ");
+        if expr.is_empty() || (!looks_math && !looks_convert && !has_prefix) {
             return Vec::new();
         }
-        let Ok(out) = Command::new("qalc").arg("-t").arg(expr).output() else {
-            return Vec::new();
-        };
-        let res = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if res.is_empty() || res == expr || res.to_lowercase().contains("error") {
+
+        // Prefer qalc; fall back to the built-in evaluator (also does unit &
+        // currency conversion).
+        let res = self.qalc_eval(expr).or_else(|| crate::eval::evaluate(expr));
+        let Some(res) = res else { return Vec::new() };
+        if res.is_empty() || res == expr {
             return Vec::new();
         }
         vec![Item::new(
@@ -59,5 +61,19 @@ impl Provider for CalcProvider {
             Action::Copy(res.clone()),
         )
         .with_prev(Prev::Text(res))]
+    }
+}
+
+impl CalcProvider {
+    fn qalc_eval(&self, expr: &str) -> Option<String> {
+        if !self.qalc {
+            return None;
+        }
+        let out = Command::new("qalc").arg("-t").arg(expr).output().ok()?;
+        let res = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if res.is_empty() || res == expr || res.to_lowercase().contains("error") {
+            return None;
+        }
+        Some(res)
     }
 }
