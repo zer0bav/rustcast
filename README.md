@@ -11,6 +11,10 @@ keyboard-driven, with a built-in **cybersecurity toolkit**.
 ## Highlights
 
 - ⚡ **App launcher** — fuzzy search over your `.desktop` apps, with icons
+- 📌 **Pin favorites** — Ctrl+K → "Pin to top" sticks your most-used apps,
+  quicklinks or commands to the top of the root (persisted across restarts)
+- ⚙️ **In-app settings** — toggle animations / clipboard from the Extensions tab;
+  add quicklinks from the UI — all written back to the config, comments preserved
 - 🎛️ **Command palette** — the root list mixes your apps with commands like
   "Kill Process", "Window Switcher", "Generate Secret"; press Enter to drop into
   an **isolated mode** where typing just filters (Esc backs out). No magic

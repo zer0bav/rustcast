@@ -17,6 +17,7 @@ pub mod files;
 pub mod gen;
 pub mod manage;
 pub mod model;
+pub mod pins;
 pub mod procs;
 pub mod provider;
 pub mod quicklinks;
@@ -36,8 +37,13 @@ use std::rc::Rc;
 ///
 /// `clip_store` is the native clipboard history handle; when `None`, the legacy
 /// cliphist-backed provider is used as a fallback.
-pub fn default_registry(cfg: &Config, clip_store: Option<Rc<clipboard::store::Store>>) -> Registry {
+pub fn default_registry(
+    cfg: &Config,
+    clip_store: Option<Rc<clipboard::store::Store>>,
+    pins: pins::PinList,
+) -> Registry {
     let mut reg = Registry::new();
+    reg.register(Box::new(pins::PinsProvider::new(pins)));
     reg.register(Box::new(commands::CommandsProvider::new()));
     reg.register(Box::new(apps::AppsProvider::new()));
     reg.register(Box::new(calc::CalcProvider::new()));

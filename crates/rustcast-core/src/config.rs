@@ -125,9 +125,11 @@ pub struct Config {
     pub clipboard: ClipboardConfig,
     pub files: FilesConfig,
     pub cyber: CyberConfig,
-    #[serde(rename = "quicklinks")]
+    // Skip when empty so `save()` never writes an inline `quicklinks = []`,
+    // which would clash with the `[[quicklinks]]` blocks `append_quicklink` adds.
+    #[serde(rename = "quicklinks", skip_serializing_if = "Vec::is_empty")]
     pub quicklinks: Vec<Quicklink>,
-    #[serde(rename = "snippets")]
+    #[serde(rename = "snippets", skip_serializing_if = "Vec::is_empty")]
     pub snippets: Vec<Snippet>,
 }
 
@@ -185,9 +187,73 @@ impl Config {
         if kind != "url" {
             block.push_str(&format!("kind = \"{}\"\n", esc(kind)));
         }
-        use std::io::Write;
-        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
-        f.write_all(block.as_bytes())?;
+        // Read existing content and strip a conflicting inline `quicklinks = []`
+        // / `snippets = []` (left by an older `save()`), then append. Without
+        // this, mixing inline arrays with `[[quicklinks]]` is invalid TOML.
+        let existing = std::fs::read_to_string(&path).unwrap_or_default();
+        let mut out: String = existing
+            .lines()
+            .filter(|l| {
+                let t = l.trim();
+                t != "quicklinks = []" && t != "quicklinks = [ ]"
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str(&block);
+        std::fs::write(&path, out)?;
+        Ok(())
+    }
+
+    /// Set a single `key = value` under `[section]` in the config file, editing
+    /// in place so comments and everything else are preserved. `value` is a TOML
+    /// literal (`true`, `42`, or a quoted string). Creates the section/key/file
+    /// if missing.
+    pub fn set_value(section: &str, key: &str, value: &str) -> anyhow::Result<()> {
+        let path = Config::config_path().ok_or_else(|| anyhow::anyhow!("no config dir"))?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let header = format!("[{section}]");
+        let mut lines: Vec<String> =
+            std::fs::read_to_string(&path).unwrap_or_default().lines().map(String::from).collect();
+
+        let mut in_section = false;
+        let mut done = false;
+        let mut header_idx = None;
+        for (idx, line) in lines.iter_mut().enumerate() {
+            let t = line.trim();
+            if t.starts_with('[') && t.ends_with(']') {
+                in_section = t == header;
+                if in_section {
+                    header_idx = Some(idx);
+                }
+                continue;
+            }
+            if in_section && !done {
+                if let Some((lhs, _)) = t.split_once('=') {
+                    if lhs.trim() == key {
+                        *line = format!("{key} = {value}");
+                        done = true;
+                    }
+                }
+            }
+        }
+        if !done {
+            match header_idx {
+                Some(i) => lines.insert(i + 1, format!("{key} = {value}")),
+                None => {
+                    if !lines.is_empty() {
+                        lines.push(String::new());
+                    }
+                    lines.push(header);
+                    lines.push(format!("{key} = {value}"));
+                }
+            }
+        }
+        std::fs::write(&path, lines.join("\n") + "\n")?;
         Ok(())
     }
 

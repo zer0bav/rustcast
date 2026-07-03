@@ -5,7 +5,7 @@
 //! actions for the Cmd-K style actions menu.
 
 /// A single action performed when the user activates a result.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Action {
     /// Launch a `.desktop` Exec line (detached via `setsid -f`).
     Launch(String),
@@ -43,6 +43,8 @@ pub enum Action {
     EnterMode { id: String, label: String },
     /// Save a new quicklink to the config and reload it live. Handled GUI-side.
     AddQuicklink { name: String, template: String, kind: String },
+    /// Set `[section] key = value` in the config and reload live. GUI-handled.
+    SetConfig { section: String, key: String, value: String },
     /// Send a signal to a PID (SIGTERM=15, SIGKILL=9). Handled GUI-side: the
     /// launcher stays open and re-queries so you can kill several in a row.
     Signal { pid: i32, signal: i32 },

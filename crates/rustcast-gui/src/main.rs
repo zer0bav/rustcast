@@ -39,6 +39,8 @@ struct State {
     clip_store: Option<Rc<Store>>,
     /// Active command mode: (provider id, display label). `None` = normal tab.
     mode: RefCell<Option<(String, String)>>,
+    /// Pinned favorites, shared live with the registry's `PinsProvider`.
+    pins: rustcast_core::pins::PinList,
 }
 
 fn main() {
@@ -228,8 +230,10 @@ fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<St
         ensure_clip_daemon();
     }
 
+    let pins: rustcast_core::pins::PinList =
+        Rc::new(RefCell::new(rustcast_core::pins::load()));
     let state = Rc::new(State {
-        registry: RefCell::new(rustcast_core::default_registry(&cfg, clip_store.clone())),
+        registry: RefCell::new(rustcast_core::default_registry(&cfg, clip_store.clone(), pins.clone())),
         matcher: ranking::matcher(),
         items: RefCell::new(Vec::new()),
         active_tab: Cell::new(initial_tab),
@@ -241,6 +245,7 @@ fn build_ui(app: &Application, start_tab: Option<String>, start_query: Option<St
         env: Env { terminal: cfg.general.terminal.clone() },
         clip_store,
         mode: RefCell::new(None),
+        pins,
     });
 
     let window = ApplicationWindow::builder()
@@ -740,7 +745,7 @@ fn apply_action(
             if Config::append_quicklink(name, template, kind).is_ok() {
                 let cfg = Config::load();
                 *state.registry.borrow_mut() =
-                    rustcast_core::default_registry(&cfg, state.clip_store.clone());
+                    rustcast_core::default_registry(&cfg, state.clip_store.clone(), state.pins.clone());
             }
             // Leave the add mode; the new quicklink is now live.
             *state.mode.borrow_mut() = None;
@@ -750,6 +755,16 @@ fn apply_action(
             ));
             entry.set_text("");
             rebuild("");
+            return;
+        }
+        Action::SetConfig { section, key, value } => {
+            // Edit the config in place, then reload so the change shows now.
+            if Config::set_value(section, key, value).is_ok() {
+                let cfg = Config::load();
+                *state.registry.borrow_mut() =
+                    rustcast_core::default_registry(&cfg, state.clip_store.clone(), state.pins.clone());
+            }
+            rebuild(&entry.text());
             return;
         }
         Action::ClipDelete(id) => {
@@ -814,21 +829,39 @@ fn open_actions_menu(
     if i < 0 {
         return;
     }
-    let secondaries = {
+    // Snapshot what we need from the selected item.
+    let (title, subtitle, icon, item_action, secondaries) = {
         let items = state.items.borrow();
-        match items.get(i as usize) {
-            Some(it) if !it.actions.is_empty() => it.actions.clone(),
-            _ => return,
-        }
+        let Some(it) = items.get(i as usize) else { return };
+        (it.title.clone(), it.subtitle.clone(), it.icon.clone(), it.action.clone(), it.actions.clone())
     };
+
+    // Build the menu: the item's own secondary actions, plus a Pin/Unpin toggle
+    // for anything pinnable. `None` marks the pin row (handled specially).
+    use rustcast_core::pins::{pin_key, PinnedItem};
+    let key = pin_key(&item_action);
+    let is_pinned = key
+        .as_ref()
+        .map(|k| state.pins.borrow().iter().any(|p| pin_key(&p.action).as_deref() == Some(k)))
+        .unwrap_or(false);
+
+    let mut entries: Vec<(String, Option<Action>)> =
+        secondaries.iter().map(|sa| (sa.label.clone(), Some(sa.action.clone()))).collect();
+    if key.is_some() {
+        let label = if is_pinned { "Unpin from top".to_string() } else { "★ Pin to top".to_string() };
+        entries.push((label, None));
+    }
+    if entries.is_empty() {
+        return;
+    }
 
     let popover = Popover::new();
     popover.add_css_class("actions-menu");
     let menu = ListBox::new();
     menu.set_selection_mode(SelectionMode::Single);
-    for sa in &secondaries {
+    for (label, _) in &entries {
         let r = ListBoxRow::new();
-        let l = Label::builder().label(&sa.label).xalign(0.0).build();
+        let l = Label::builder().label(label).xalign(0.0).build();
         l.add_css_class("action-row");
         r.set_child(Some(&l));
         menu.append(&r);
@@ -843,10 +876,35 @@ fn open_actions_menu(
     let popover2 = popover.clone();
     menu.connect_row_activated(move |_, r| {
         let idx = r.index();
-        if idx >= 0 {
-            if let Some(sa) = secondaries.get(idx as usize) {
-                popover2.popdown();
-                apply_action(&state2, &sa.action, &entry2, &win2, &rebuild2);
+        if idx < 0 {
+            return;
+        }
+        let Some((_, act)) = entries.get(idx as usize) else { return };
+        popover2.popdown();
+        match act {
+            Some(action) => apply_action(&state2, action, &entry2, &win2, &rebuild2),
+            None => {
+                // Toggle the pin, persist, and refresh live (PinsProvider shares
+                // the same list).
+                {
+                    let mut pins = state2.pins.borrow_mut();
+                    if is_pinned {
+                        if let Some(k) = &key {
+                            pins.retain(|p| pin_key(&p.action).as_deref() != Some(k.as_str()));
+                        }
+                    } else {
+                        pins.push(PinnedItem {
+                            title: title.clone(),
+                            subtitle: subtitle.clone(),
+                            icon: icon.clone(),
+                            action: item_action.clone(),
+                        });
+                    }
+                    let snapshot = pins.clone();
+                    drop(pins);
+                    rustcast_core::pins::save(&snapshot);
+                }
+                rebuild2(&entry2.text());
             }
         }
     });

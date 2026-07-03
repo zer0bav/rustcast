@@ -10,6 +10,9 @@ use fuzzy_matcher::FuzzyMatcher;
 pub struct SettingsProvider {
     lines: Vec<(String, String)>,
     quicklinks: Vec<Quicklink>,
+    animations: bool,
+    clip_enabled: bool,
+    clip_cap: usize,
 }
 
 impl SettingsProvider {
@@ -25,9 +28,7 @@ impl SettingsProvider {
             ("Version".into(), env!("CARGO_PKG_VERSION").to_string()),
             ("Default tab".into(), cfg.general.default_tab.clone()),
             ("Terminal".into(), cfg.general.terminal.clone()),
-            ("Animations".into(), cfg.ui.animations.to_string()),
             ("Window size".into(), format!("{}×{}", cfg.ui.width, cfg.ui.height)),
-            ("Clipboard".into(), format!("enabled={} · cap={}", cfg.clipboard.enabled, cfg.clipboard.max_entries)),
             ("File roots".into(), cfg.files.roots.join(", ")),
             ("Cyber target".into(), target),
             ("Quicklinks".into(), cfg.quicklinks.len().to_string()),
@@ -35,7 +36,21 @@ impl SettingsProvider {
             ("Config dir".into(), cfg_dir),
             ("Data dir".into(), data_dir),
         ];
-        SettingsProvider { lines, quicklinks: cfg.quicklinks.clone() }
+        SettingsProvider {
+            lines,
+            quicklinks: cfg.quicklinks.clone(),
+            animations: cfg.ui.animations,
+            clip_enabled: cfg.clipboard.enabled,
+            clip_cap: cfg.clipboard.max_entries,
+        }
+    }
+}
+
+fn onoff(b: bool) -> &'static str {
+    if b {
+        "on"
+    } else {
+        "off"
     }
 }
 
@@ -141,6 +156,32 @@ impl Provider for SettingsProvider {
                 || ctx.matcher.fuzzy_match(&title.to_lowercase(), &q).is_some();
             if matches {
                 out.push(Item::new(title, sub, icon, "settings", 500, action));
+            }
+        }
+
+        // Live-toggleable settings — Enter flips the value in the config file.
+        let toggles: [(String, Action); 2] = [
+            (
+                format!("Animations: {}", onoff(self.animations)),
+                Action::SetConfig {
+                    section: "ui".into(),
+                    key: "animations".into(),
+                    value: (!self.animations).to_string(),
+                },
+            ),
+            (
+                format!("Clipboard history: {} · cap {}", onoff(self.clip_enabled), self.clip_cap),
+                Action::SetConfig {
+                    section: "clipboard".into(),
+                    key: "enabled".into(),
+                    value: (!self.clip_enabled).to_string(),
+                },
+            ),
+        ];
+        for (title, action) in toggles {
+            let matches = q.is_empty() || title.to_lowercase().contains(&q);
+            if matches {
+                out.push(Item::new(title, "press Enter to toggle", "emblem-system", "settings", 450, action));
             }
         }
 
