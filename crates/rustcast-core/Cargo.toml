@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "rustcast core — pure logic (no GTK): providers, ranking, config, cyber toolkit"
+repository = "https://github.com/zer0bav/rustcast"
+homepage = "https://github.com/zer0bav/rustcast"
+keywords = ["launcher", "raycast", "cybersecurity", "tldr", "cli"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 fuzzy-matcher.workspace = true

@@ -18,19 +18,19 @@ const CHEAT_HINTS: &[ActionHint] = &[
 
 /// Bundled cheatsheets: (display name, markdown body). Compiled into the binary.
 const BUILTIN: &[(&str, &str)] = &[
-    ("nmap", include_str!("../../../assets/cheatsheets/nmap.md")),
-    ("netcat", include_str!("../../../assets/cheatsheets/netcat.md")),
-    ("tcpdump", include_str!("../../../assets/cheatsheets/tcpdump.md")),
-    ("ffuf & gobuster", include_str!("../../../assets/cheatsheets/ffuf-gobuster.md")),
-    ("hashcat & john", include_str!("../../../assets/cheatsheets/hashcat-john.md")),
-    ("sqlmap", include_str!("../../../assets/cheatsheets/sqlmap.md")),
-    ("linux privesc", include_str!("../../../assets/cheatsheets/linux-privesc.md")),
-    ("tmux", include_str!("../../../assets/cheatsheets/tmux.md")),
-    ("vim", include_str!("../../../assets/cheatsheets/vim.md")),
-    ("gdb", include_str!("../../../assets/cheatsheets/gdb.md")),
-    ("ssh", include_str!("../../../assets/cheatsheets/ssh.md")),
-    ("curl", include_str!("../../../assets/cheatsheets/curl.md")),
-    ("git", include_str!("../../../assets/cheatsheets/git.md")),
+    ("nmap", include_str!("../assets/cheatsheets/nmap.md")),
+    ("netcat", include_str!("../assets/cheatsheets/netcat.md")),
+    ("tcpdump", include_str!("../assets/cheatsheets/tcpdump.md")),
+    ("ffuf & gobuster", include_str!("../assets/cheatsheets/ffuf-gobuster.md")),
+    ("hashcat & john", include_str!("../assets/cheatsheets/hashcat-john.md")),
+    ("sqlmap", include_str!("../assets/cheatsheets/sqlmap.md")),
+    ("linux privesc", include_str!("../assets/cheatsheets/linux-privesc.md")),
+    ("tmux", include_str!("../assets/cheatsheets/tmux.md")),
+    ("vim", include_str!("../assets/cheatsheets/vim.md")),
+    ("gdb", include_str!("../assets/cheatsheets/gdb.md")),
+    ("ssh", include_str!("../assets/cheatsheets/ssh.md")),
+    ("curl", include_str!("../assets/cheatsheets/curl.md")),
+    ("git", include_str!("../assets/cheatsheets/git.md")),
 ];
 
 struct Sheet {

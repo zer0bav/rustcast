@@ -1,16 +1,29 @@
 [package]
-name = "rustcast-gui"
+name = "rustcast-linux"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "rustcast GUI — GTK4 layer-shell launcher binary"
+description = "rustcast — a Raycast-class GTK4 launcher for Linux (installs the `rustcast` binary)"
+repository = "https://github.com/zer0bav/rustcast"
+homepage = "https://github.com/zer0bav/rustcast"
+readme = "README.md"
+keywords = ["launcher", "raycast", "gtk4", "wayland", "cybersecurity"]
+categories = ["gui", "command-line-utilities"]
 
 [[bin]]
 name = "rustcast"
 path = "src/main.rs"
 
 [dependencies]
-rustcast-core = { path = "../rustcast-core" }
+# `version` is required for crates.io (path is used only in this workspace).
+rustcast-core = { path = "../rustcast-core", version = "0.2.0" }
 gtk4 = { version = "0.9", features = ["v4_10"] }
 gtk4-layer-shell = "0.5"
 fuzzy-matcher.workspace = true
+
+# Applied when the crate is the build root (e.g. `cargo install rustcast-linux`);
+# the workspace profile isn't carried into the published crate.
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

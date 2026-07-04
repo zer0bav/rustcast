@@ -1374,7 +1374,7 @@ fn load_css(cfg: &Config) {
         // Embed the default theme at compile time so the binary is self-contained
         // (a packaged/installed binary has no source tree to read from).
         const DEFAULT_CSS: &str =
-            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/style.css"));
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/style.css"));
         provider.load_from_data(DEFAULT_CSS);
     }
     if let Some(d) = Display::default() {
