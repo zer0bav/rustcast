@@ -89,6 +89,16 @@ Needs GTK 4 (and `gtk4-layer-shell` for the wlroots overlay) installed. This
 gives you just the binary — bind it to a hotkey (see below); for the desktop
 entry and daemons, use `install.sh` or the packages below.
 
+### Nix
+
+```bash
+nix run github:zer0bav/rustcast              # run it once
+nix profile install github:zer0bav/rustcast  # install into your profile
+```
+
+A `flake.nix` builds a self-contained package (GTK libs wrapped in). `nix
+develop` drops you into a dev shell with the toolchain.
+
 ### From source (with desktop entry + daemons)
 
 ```bash
