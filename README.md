@@ -79,6 +79,18 @@ keyboard-driven, with a built-in **cybersecurity toolkit**.
 
 ## Install
 
+### From crates.io
+
+```bash
+cargo install rustcast-linux    # installs the `rustcast` binary
+```
+
+Needs GTK 4 (and `gtk4-layer-shell` for the wlroots overlay) installed. This
+gives you just the binary — bind it to a hotkey (see below); for the desktop
+entry and daemons, use `install.sh` or the packages below.
+
+### From source (with desktop entry + daemons)
+
 ```bash
 git clone https://github.com/zer0bav/rustcast
 cd rustcast
