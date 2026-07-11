@@ -647,14 +647,22 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
     let rebuild: Rc<dyn Fn(&str)> = Rc::new(rebuild);
 
     // ── tab switching ───────────────────────────────────────
+    // Preview pane is only meaningful on content tabs; hide it elsewhere for a
+    // minimal single-column (rofi-style) look. Clipboard always keeps it.
+    fn tab_shows_preview(tab: Tab) -> bool {
+        matches!(tab, Tab::Clipboard | Tab::Files | Tab::Cheat | Tab::Cyber)
+    }
+
     let switch_tab = {
         let state = state.clone();
         let entry = entry.clone();
         let tab_buttons = tab_buttons.clone();
         let rebuild = rebuild.clone();
         let rebuild_footer = rebuild_footer.clone();
+        let preview = preview.clone();
         move |tab: Tab| {
             state.active_tab.set(tab);
+            preview.set_visible(tab_shows_preview(tab));
             // Switching tabs always leaves any active command mode.
             *state.mode.borrow_mut() = None;
             entry.remove_css_class("mode-active");
@@ -680,6 +688,9 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
             }
         });
     }
+
+    // Initial preview visibility matches the starting tab.
+    preview.set_visible(tab_shows_preview(state.active_tab.get()));
 
     // ── entry changes ───────────────────────────────────────
     {
@@ -1249,13 +1260,13 @@ fn md_to_pango(src: &str) -> String {
         if let Some(rest) = line.strip_prefix("### ") {
             out.push_str(&format!("<span weight='bold'>{}</span>", pango_escape(rest)));
         } else if let Some(rest) = line.strip_prefix("## ") {
-            out.push_str(&format!("<span size='large' weight='bold' foreground='#ff6b6b'>{}</span>", pango_escape(rest)));
+            out.push_str(&format!("<span size='large' weight='bold' foreground='#fb4934'>{}</span>", pango_escape(rest)));
         } else if let Some(rest) = line.strip_prefix("# ") {
             if !seen_title {
                 seen_title = true;
-                out.push_str(&format!("<span size='x-large' weight='bold' foreground='#ff6b6b'>{}</span>", pango_escape(rest)));
+                out.push_str(&format!("<span size='x-large' weight='bold' foreground='#fb4934'>{}</span>", pango_escape(rest)));
             } else {
-                out.push_str(&format!("<span foreground='#8a8a8a'>{}</span>", pango_escape(line)));
+                out.push_str(&format!("<span foreground='#928374'>{}</span>", pango_escape(line)));
             }
         } else {
             if !line.trim().is_empty() {
