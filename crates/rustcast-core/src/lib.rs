@@ -55,11 +55,9 @@ pub fn default_registry(
     reg.register(Box::new(quicklinks::QuicklinksProvider::new(cfg.quicklinks.clone())));
     reg.register(Box::new(snippets::SnippetsProvider::new(cfg.snippets.clone())));
     reg.register(Box::new(system::SystemProvider::new()));
-    if clip_store.is_some() {
-        reg.register(Box::new(clipboard::ClipboardProvider::new(clip_store)));
-    } else {
-        reg.register(Box::new(clip::ClipProvider::new()));
-    }
+    // Native store yerine cliphist kullan — watcher'ı oto-restart'lı (robust), bir daha bozulmaz.
+    let _ = clip_store;
+    reg.register(Box::new(clip::ClipProvider::new()));
     if cfg.files.enabled {
         reg.register(Box::new(files::FilesProvider::new(
             cfg.files.roots.clone(),

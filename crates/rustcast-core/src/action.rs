@@ -79,7 +79,7 @@ pub fn clip_copy(line: &str) {
     let _ = Command::new("sh")
         .env("L", line)
         .arg("-c")
-        .arg("printf '%s' \"$L\" | cliphist decode | wl-copy")
+        .arg("setsid -f sh -c 'printf %s \"$L\" | cliphist decode | wl-copy'")
         .spawn();
 }
 
