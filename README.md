@@ -114,20 +114,23 @@ desktop entry and default config, and (on systemd) enables the resident launcher
 daemon plus, on Wayland, the clipboard history daemon. It prints the exact
 keybinding snippet for your desktop.
 
-### Arch Linux
-
-A ready-to-build `rustcast-git` package lives in `packaging/aur/` — no AUR
-account needed, install it straight from this repo:
+### Arch Linux (AUR)
 
 ```bash
-git clone https://github.com/zer0bav/rustcast
-cd rustcast/packaging/aur
-makepkg -si            # builds a pacman package (from the latest git) and installs it
+yay -S rustcast-git       # or: paru -S rustcast-git
 ```
 
-This gives you a proper `pacman`-tracked package (`pacman -R rustcast-git` to
+[`rustcast-git`](https://aur.archlinux.org/packages/rustcast-git) builds from the
+latest commit. Without an AUR helper, or to build the PKGBUILD straight from this
+repo:
+
+```bash
+git clone https://aur.archlinux.org/rustcast-git.git
+cd rustcast-git && makepkg -si
+```
+
+Either way you get a `pacman`-tracked package (`pacman -R rustcast-git` to
 remove) with the systemd user services and desktop entry installed system-wide.
-An AUR upload is planned once registration reopens.
 
 Build dependencies: `cargo`, `gtk4` (dev), and — for the overlay mode on
 wlroots — `gtk4-layer-shell` (dev).
