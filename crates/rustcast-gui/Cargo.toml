@@ -7,7 +7,7 @@ description = "rustcast — a Raycast-class GTK4 launcher for Linux (installs th
 repository = "https://github.com/zer0bav/rustcast"
 homepage = "https://github.com/zer0bav/rustcast"
 readme = "README.md"
-keywords = ["launcher", "raycast", "gtk4", "wayland", "cybersecurity"]
+keywords = ["launcher", "raycast", "gtk4", "wayland", "clipboard"]
 categories = ["gui", "command-line-utilities"]
 
 [[bin]]
@@ -16,7 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 # `version` is required for crates.io (path is used only in this workspace).
-rustcast-core = { path = "../rustcast-core", version = "0.2.0" }
+rustcast-core = { path = "../rustcast-core", version = "0.3.0" }
 gtk4 = { version = "0.9", features = ["v4_10"] }
 gtk4-layer-shell = "0.5"
 fuzzy-matcher.workspace = true

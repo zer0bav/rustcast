@@ -98,6 +98,7 @@ impl Provider for PinsProvider {
                     20_000 - i as i64,
                     p.action.clone(),
                 )
+                .in_section(crate::registry::section::FAVORITES)
             })
             .collect()
     }
@@ -125,9 +126,9 @@ mod tests {
         }]));
         let p = PinsProvider::new(pins);
         let m = crate::ranking::matcher();
-        let empty = QueryCtx { raw: "", query: "", active_tab: Tab::Apps, matcher: &m, target: None, mode: None };
+        let empty = QueryCtx { raw: "", query: "", active_tab: Tab::Apps, matcher: &m, mode: None };
         assert_eq!(p.query(&empty).len(), 1);
-        let typed = QueryCtx { raw: "fire", query: "fire", active_tab: Tab::Apps, matcher: &m, target: None, mode: None };
+        let typed = QueryCtx { raw: "fire", query: "fire", active_tab: Tab::Apps, matcher: &m, mode: None };
         assert_eq!(p.query(&typed).len(), 0);
     }
 }

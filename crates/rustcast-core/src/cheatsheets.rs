@@ -153,7 +153,7 @@ mod tests {
             Sheet { name: "vim".into(), body: "# vim\nedit".into(), source: None },
         ]};
         let m = crate::ranking::matcher();
-        let ctx = QueryCtx { raw: "nmap", query: "nmap", active_tab: Tab::Cheat, matcher: &m, target: None, mode: None };
+        let ctx = QueryCtx { raw: "nmap", query: "nmap", active_tab: Tab::Cheat, matcher: &m, mode: None };
         let r = p.query(&ctx);
         assert_eq!(r[0].title, "nmap");
     }

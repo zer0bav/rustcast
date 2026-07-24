@@ -4,7 +4,6 @@
 use crate::config::Snippet;
 use crate::model::{Action, Item};
 use crate::provider::{Provider, QueryCtx, Tab};
-use fuzzy_matcher::FuzzyMatcher;
 
 pub struct SnippetsProvider {
     snippets: Vec<Snippet>,
@@ -49,13 +48,13 @@ impl Provider for SnippetsProvider {
         let mut out = Vec::new();
         for s in &self.snippets {
             let name = if s.name.is_empty() { &s.keyword } else { &s.name };
-            let hay = format!("{} {} {}", s.keyword, name, s.text).to_lowercase();
             let kw_match = !s.keyword.is_empty() && s.keyword.to_lowercase() == q;
+            let hidden = format!("{} {}", s.keyword, s.text);
             let score = if kw_match {
-                6000
+                crate::ranking::EXACT + 1_000
             } else {
-                match ctx.matcher.fuzzy_match(&hay, &q) {
-                    Some(s) => s,
+                match crate::ranking::score(ctx.matcher, name, &hidden, &q) {
+                    Some(sc) => sc,
                     None => continue,
                 }
             };
@@ -68,6 +67,7 @@ impl Provider for SnippetsProvider {
                 score,
                 Action::Copy(expanded.clone()),
             )
+            .in_section(crate::registry::section::SNIPPETS)
             .with_prev(crate::model::Prev::Text(expanded));
             out.push(item);
         }

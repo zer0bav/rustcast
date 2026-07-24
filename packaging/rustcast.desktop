@@ -2,10 +2,10 @@
 Type=Application
 Name=rustcast
 GenericName=Application Launcher
-Comment=Raycast-class launcher with a cybersecurity toolkit
+Comment=Raycast-class launcher with clipboard history and file search
 Exec=rustcast
 Icon=system-search
 Terminal=false
 Categories=Utility;System;
-Keywords=launcher;search;clipboard;cyber;
+Keywords=launcher;search;clipboard;
 StartupNotify=false

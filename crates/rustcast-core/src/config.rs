@@ -88,12 +88,6 @@ impl Default for FilesConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, Default)]
-#[serde(default)]
-pub struct CyberConfig {
-    pub default_target: String,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Quicklink {
     pub name: String,
@@ -146,7 +140,6 @@ pub struct Config {
     pub general: GeneralConfig,
     pub clipboard: ClipboardConfig,
     pub files: FilesConfig,
-    pub cyber: CyberConfig,
     // Skip when empty so `save()` never writes an inline `quicklinks = []`,
     // which would clash with the `[[quicklinks]]` blocks `append_quicklink` adds.
     #[serde(rename = "quicklinks", skip_serializing_if = "Vec::is_empty")]

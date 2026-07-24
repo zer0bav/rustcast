@@ -148,6 +148,7 @@ impl Provider for FilesProvider {
                     s,
                     Action::OpenFile(e.path.clone()),
                 )
+                .in_section(crate::registry::section::FILES)
                 .with_prev(Prev::File { path: e.path.clone(), meta, head: None })
                 .with_actions(vec![
                     SecondaryAction { label: "Reveal in file manager".into(), action: Action::RevealFile(e.path.clone()) },

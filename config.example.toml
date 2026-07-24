@@ -8,7 +8,7 @@ animations = true
 # theme = "/path/to/custom/style.css"   # else ~/.config/rustcast/style.css, else bundled
 
 [general]
-default_tab = "apps"          # apps | clipboard | files | cyber | cheat | windows | extensions
+default_tab = "apps"          # apps | clipboard | files | cheat | windows | extensions
 terminal = "kitty -e"         # auto-detected if omitted
 
 [clipboard]
@@ -20,9 +20,6 @@ max_image_mb = 50
 enabled = true
 roots = ["~"]
 ignore = [".cache", "node_modules", ".git", ".cargo", "target"]
-
-[cyber]
-default_target = ""           # e.g. "10.0.0.5:4444" — reused by payloads/templates
 
 # ── Quicklinks ──────────────────────────────────────────────
 # Trigger by name from the Apps tab; {query} is the text after the name.

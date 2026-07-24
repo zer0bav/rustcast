@@ -1,10 +1,10 @@
 # rustcast 🦀🚀
 
 A **Raycast-class application launcher for Linux**, written in Rust — fast, native,
-keyboard-driven, with a built-in **cybersecurity toolkit**.
+keyboard-driven.
 
-> Linux deserves a launcher as good as Raycast: instant, extensible, hacker-red —
-> and useful whether you're red team, blue team, or just launching apps.
+> Linux deserves a launcher as good as Raycast: instant, sectioned results that
+> learn your habits, a real clipboard history, and everything one keystroke away.
 
 ![Command palette](docs/screenshots/apps.png)
 
@@ -13,8 +13,13 @@ keyboard-driven, with a built-in **cybersecurity toolkit**.
 - ⚡ **Instant** — runs as a resident daemon; the hotkey toggles the window in
   tens of milliseconds instead of cold-starting GTK each time. The app index is
   disk-cached and refreshed in the background
-- 🔎 **App launcher** — fuzzy search over your `.desktop` apps, with icons, and
-  **frecency** ranking that floats your most-used items to the top
+- 🎯 **Ranking that gets it right** — matches are bucketed by quality (exact →
+  prefix → word-start → initials → substring → fuzzy), so `si` gives you
+  **Si**gnal, not "Exten**si**on Manager". Inside a bucket your usage history
+  (**frecency**) decides, so your most-used app wins ties
+- 🗂️ **Sectioned results** — Favorites, Suggestions, Applications, Commands,
+  Quicklinks… each group titled and ordered by its best hit, Raycast-style. The
+  empty root opens on what you actually use
 - 📖 **tldr search** — the Cheats tab searches the official
   [tldr-pages](https://github.com/tldr-pages/tldr) (10k+ community command
   examples). Each example is its own row: Enter copies just that command
@@ -29,13 +34,12 @@ keyboard-driven, with a built-in **cybersecurity toolkit**.
   "Kill Process", "Window Switcher", "Generate Secret"; press Enter to drop into
   an **isolated mode** where typing just filters (Esc backs out). No magic
   prefixes, so a command never collides with an app of the same name
-- 📋 **Native clipboard history** — text **and** images, live previews, pin/delete,
-  dedup. Its own background watcher (no `cliphist`, no prefixes)
+- 📋 **Native clipboard history** — text **and** images with a rich preview pane
+  (type, characters, words, size, when it was copied). `Ctrl+D` deletes,
+  `Ctrl+S` pins, both without leaving the list. Dedup + its own background
+  watcher (no `cliphist`, no prefixes)
 - 🔎 **File search** — fuzzy find with live preview and **drag-and-drop** out to
   other apps (plus copy-path fallback)
-- 🛡️ **Cyber toolkit** — base64/hex/url/rot13 codecs, md5/sha1/sha256/sha512,
-  JWT decode, CIDR calculator, epoch↔time, defang/refang, reverse-shell generator,
-  and OSINT link-outs (VirusTotal/Shodan/NVD…) — all live as you type
 - 💀 **Kill Process** — lists processes with owner + memory; Enter sends SIGTERM,
   Ctrl+K force-kills; stays open so you can kill several in a row
 - 🔌 **Port Inspector** — shows what's listening on a port and kills it
@@ -55,19 +59,17 @@ keyboard-driven, with a built-in **cybersecurity toolkit**.
 - 🔤 **Clipboard image OCR** — Ctrl+K → "Extract text (OCR)" on an image (tesseract)
 - 🩺 **Dependency check** — the Extensions/settings tab shows which optional tools
   are present or missing, with install hints
-- ⌨️ **Mode tabs** (Apps · Clipboard · Files · Cyber · Cheats · Windows · Extensions)
+- ⌨️ **Mode tabs** (Apps · Clipboard · Files · Cheats · Windows · Extensions)
   and a Cmd-K style actions menu
-- 🔴⚫ Softened red/black theme, English UI, GTK4
+- 🎨 Gruvbox-dark theme, single-line rows, English UI, GTK4
 
 ### More screenshots
 
-| Cyber toolkit | Cheatsheets (Markdown) |
+| Search — best match first | Cheatsheets & tldr |
 |---|---|
-| ![Cyber](docs/screenshots/cyber.png) | ![Cheats](docs/screenshots/cheats.png) |
-| **File search + drag-out** | **Window switcher** |
-| ![Files](docs/screenshots/files.png) | ![Windows](docs/screenshots/windows.png) |
-| **Extensions & settings** | |
-| ![Extensions](docs/screenshots/extensions.png) | |
+| ![Search](docs/screenshots/search.png) | ![Cheats](docs/screenshots/cheats.png) |
+| **File search + drag-out** | **Extensions & settings** |
+| ![Files](docs/screenshots/files.png) | ![Extensions](docs/screenshots/extensions.png) |
 
 ## Works everywhere
 
@@ -162,13 +164,13 @@ your compositor, bind `rustcast --no-daemon` for the classic one-shot mode.
 ## Usage
 
 - Type to search; `↑`/`↓` (or `Ctrl+J/K`) to move; `Enter` to run.
-- `Tab` / `Shift+Tab` cycle tabs; `Ctrl+1..7` jump to one.
+- `Tab` / `Shift+Tab` cycle tabs; `Ctrl+1..6` jump to one.
 - `Ctrl+K` opens the actions menu (copy, delete, pin, reveal, force-kill, …).
 - `Esc` clears the query, then closes.
 
-**Cyber tab** — type a keyword or just paste: `b64 hello`, `hash secret`, a JWT,
-`cidr 10.0.0.0/24`, `ts 1516239022`, `rev 10.0.0.5:4444`, `defang http://1.2.3.4`,
-`link CVE-2021-44228`, `target 10.0.0.5`.
+**Clipboard tab** — `Enter` copies the entry back, `Ctrl+D` deletes it,
+`Ctrl+S` pins it to the top (pinned entries survive "clear history"), `Ctrl+K`
+has the rest (OCR an image, copy as a single line, clear history).
 
 **Command modes** — find a command in the root list ("Kill Process", "Window
 Switcher", "Port Inspector", "Generate Secret", "Search Cheatsheets") and press
@@ -177,8 +179,8 @@ backs out). Because you *enter* the mode rather than type a magic prefix, a
 command never collides with an app of the same name. The **Windows** tab (or
 `Super+Alt+W`) opens the window switcher directly.
 
-The cyber toolkit still uses inline prefixes (`= 2+2`, `b64 hello`, `hash …`,
-`jwt …`, `cidr …`, `rev host:port`, `link CVE-…`).
+The calculator answers from any tab, either inline (`12*4`, `10 km in mi`) or
+behind the `=` prefix.
 
 **Cheats tab** — search the tldr-pages (the first use downloads the ~5 MB archive;
 Enter the "Download tldr pages" row). Type a command like `tar extract` or
@@ -212,7 +214,7 @@ See `plugins/example-echo/` for a working sample.
 ## Architecture
 
 A Cargo workspace: **`rustcast-core`** (pure logic, no GTK — providers, ranking,
-config, and the cyber toolkit, all unit-tested headlessly) and **`rustcast-gui`**
+config, all unit-tested headlessly) and **`rustcast-gui`**
 (the GTK4 binary). Providers implement a common trait and plug into tabs and
 inline prefixes via a registry.
 

@@ -2,7 +2,7 @@
 //!
 //! The GUI crate builds a [`registry::Registry`] of [`provider::Provider`]s and
 //! renders whatever [`model::Item`]s they return. Everything here is unit-testable
-//! headlessly, which is why the cyber toolkit and ranking live on this side.
+//! headlessly, which is why matching, ranking and config live on this side.
 
 pub mod action;
 pub mod apps;
@@ -13,7 +13,6 @@ pub mod commands;
 pub mod clipboard;
 pub mod aliases;
 pub mod config;
-pub mod cyber;
 pub mod eval;
 pub mod files;
 pub mod frecency;
@@ -55,9 +54,13 @@ pub fn default_registry(
     reg.register(Box::new(quicklinks::QuicklinksProvider::new(cfg.quicklinks.clone())));
     reg.register(Box::new(snippets::SnippetsProvider::new(cfg.snippets.clone())));
     reg.register(Box::new(system::SystemProvider::new()));
-    // Native store yerine cliphist kullan — watcher'ı oto-restart'lı (robust), bir daha bozulmaz.
-    let _ = clip_store;
-    reg.register(Box::new(clip::ClipProvider::new()));
+    // Native SQLite history when it opened (pin / delete / rich preview all need
+    // the store); the read-only cliphist bridge is the fallback for when it
+    // didn't — there the entries are not ours to mutate.
+    match clip_store {
+        Some(store) => reg.register(Box::new(clipboard::ClipboardProvider::new(Some(store)))),
+        None => reg.register(Box::new(clip::ClipProvider::new())),
+    }
     if cfg.files.enabled {
         reg.register(Box::new(files::FilesProvider::new(
             cfg.files.roots.clone(),
@@ -66,7 +69,6 @@ pub fn default_registry(
     }
     reg.register(Box::new(procs::ProcessProvider::new()));
     reg.register(Box::new(windows::WindowsProvider::new()));
-    reg.register(Box::new(cyber::CyberProvider::new()));
     reg.register(Box::new(procs::PortsProvider::new()));
     reg.register(Box::new(gen::GenProvider::new()));
     // tldr first among Cheat providers so its placeholder/footer hints win.

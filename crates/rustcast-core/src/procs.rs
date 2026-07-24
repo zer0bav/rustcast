@@ -158,7 +158,7 @@ impl Provider for PortsProvider {
         "ports"
     }
     fn tab(&self) -> Tab {
-        Tab::Cyber
+        Tab::Apps
     }
     fn placeholder(&self) -> &'static str {
         "Inspect a listening port… (e.g. 8080)"

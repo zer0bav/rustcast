@@ -1,5 +1,5 @@
 {
-  description = "rustcast — a Raycast-class GTK4 launcher for Linux with a tldr search and a cybersecurity toolkit";
+  description = "rustcast — a Raycast-class GTK4 launcher for Linux with clipboard history, file search and tldr";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -35,7 +35,7 @@
           doCheck = false;
 
           meta = with pkgs.lib; {
-            description = "A Raycast-class GTK4 launcher for Linux with a tldr search and a cybersecurity toolkit";
+            description = "A Raycast-class GTK4 launcher for Linux with clipboard history, file search and tldr";
             homepage = "https://github.com/zer0bav/rustcast";
             license = licenses.mit;
             mainProgram = "rustcast";

@@ -3,10 +3,10 @@ name = "rustcast-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "rustcast core — pure logic (no GTK): providers, ranking, config, cyber toolkit"
+description = "rustcast core — pure logic (no GTK): providers, ranking, config"
 repository = "https://github.com/zer0bav/rustcast"
 homepage = "https://github.com/zer0bav/rustcast"
-keywords = ["launcher", "raycast", "cybersecurity", "tldr", "cli"]
+keywords = ["launcher", "raycast", "clipboard", "tldr", "cli"]
 categories = ["command-line-utilities"]
 
 [dependencies]

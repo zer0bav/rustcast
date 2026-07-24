@@ -7,7 +7,6 @@
 use crate::config::Alias;
 use crate::model::{Action, Item, SecondaryAction};
 use crate::provider::{Provider, QueryCtx, Tab};
-use fuzzy_matcher::FuzzyMatcher;
 
 pub struct AliasProvider {
     aliases: Vec<Alias>,
@@ -46,12 +45,12 @@ impl Provider for AliasProvider {
             let kw = a.keyword.to_lowercase();
             // Exact trigger dominates; otherwise fuzzy-match the keyword + name
             // so a partial type still finds the alias.
+            // Typing an alias exactly is the strongest possible intent.
             let score = if kw == first {
-                7_000
+                crate::ranking::EXACT + 3_000
             } else {
-                let hay = format!("{} {}", a.keyword, a.name).to_lowercase();
-                match ctx.matcher.fuzzy_match(&hay, &q) {
-                    Some(s) => s + 500,
+                match crate::ranking::score(ctx.matcher, &a.name, &a.keyword, &q) {
+                    Some(s) => s,
                     None => continue,
                 }
             };
@@ -75,6 +74,7 @@ impl Provider for AliasProvider {
                     score,
                     action.clone(),
                 )
+                .in_section(crate::registry::section::ALIASES)
                 .with_actions(vec![SecondaryAction {
                     label: "Copy target".into(),
                     action: Action::Copy(a.target.clone()),
@@ -103,10 +103,10 @@ mod tests {
     fn exact_keyword_scores_high() {
         let p = AliasProvider::new(vec![ff()]);
         let m = crate::ranking::matcher();
-        let ctx = QueryCtx { raw: "ff", query: "ff", active_tab: Tab::Apps, matcher: &m, target: None, mode: None };
+        let ctx = QueryCtx { raw: "ff", query: "ff", active_tab: Tab::Apps, matcher: &m, mode: None };
         let r = p.query(&ctx);
         assert_eq!(r.len(), 1);
-        assert_eq!(r[0].score, 7_000);
+        assert_eq!(r[0].score, crate::ranking::EXACT + 3_000);
         assert!(matches!(r[0].action, Action::Launch(_)));
     }
 
@@ -114,7 +114,7 @@ mod tests {
     fn empty_query_is_silent() {
         let p = AliasProvider::new(vec![ff()]);
         let m = crate::ranking::matcher();
-        let ctx = QueryCtx { raw: "", query: "", active_tab: Tab::Apps, matcher: &m, target: None, mode: None };
+        let ctx = QueryCtx { raw: "", query: "", active_tab: Tab::Apps, matcher: &m, mode: None };
         assert!(p.query(&ctx).is_empty());
     }
 }

@@ -4,7 +4,6 @@
 use crate::config::Quicklink;
 use crate::model::{Action, Item, SecondaryAction};
 use crate::provider::{Provider, QueryCtx, Tab};
-use fuzzy_matcher::FuzzyMatcher;
 
 pub struct QuicklinksProvider {
     links: Vec<Quicklink>,
@@ -47,8 +46,8 @@ impl Provider for QuicklinksProvider {
         for ql in &self.links {
             let is_url = ql.kind == "url" || ql.template.starts_with("http");
             let name_match = ql.name.eq_ignore_ascii_case(first);
-            let fuzzy = ctx.matcher.fuzzy_match(&ql.name.to_lowercase(), &raw.to_lowercase());
-            if !name_match && fuzzy.is_none() {
+            let partial = crate::ranking::score_name(ctx.matcher, &ql.name, raw);
+            if !name_match && partial.is_none() {
                 continue;
             }
             let arg = if name_match { rest } else { "" };
@@ -58,7 +57,14 @@ impl Provider for QuicklinksProvider {
             } else {
                 Action::RunShell(resolved.clone())
             };
-            let score = if name_match { 6000 } else { fuzzy.unwrap_or(0) };
+            // An exact trigger is the most explicit thing the user can type, so
+            // it sits above every other exact match; a partial one just ranks in
+            // the normal tiers.
+            let score = if name_match {
+                crate::ranking::EXACT + 2_000
+            } else {
+                partial.unwrap_or(0)
+            };
             let icon = if ql.icon.is_empty() {
                 if is_url { "web-browser".to_string() } else { "utilities-terminal".to_string() }
             } else {
@@ -73,6 +79,7 @@ impl Provider for QuicklinksProvider {
                     score,
                     action,
                 )
+                .in_section(crate::registry::section::QUICKLINKS)
                 .with_actions(vec![SecondaryAction {
                     label: "Copy".into(),
                     action: Action::Copy(resolved),

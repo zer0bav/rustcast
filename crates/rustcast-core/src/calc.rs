@@ -57,9 +57,10 @@ impl Provider for CalcProvider {
             format!("{expr}  ·  copy to clipboard"),
             "accessories-calculator",
             "calc",
-            10_000, // pin to top
+            18_000, // an evaluated expression is what you asked for: pin to top
             Action::Copy(res.clone()),
         )
+        .in_section(crate::registry::section::CALCULATOR)
         .with_prev(Prev::Text(res))]
     }
 }

@@ -168,8 +168,6 @@ pub fn do_action(a: &Action, env: &Env) -> bool {
             reveal(p);
             true
         }
-        // Setting a target keeps the window open; the GUI handles the state update.
-        Action::SetTarget(_) => false,
         // These are GUI-side view changes; the window stays open.
         Action::SetQuery(_) => false,
         Action::EnterMode { .. } => false,

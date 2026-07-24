@@ -12,9 +12,11 @@ use std::collections::HashMap;
 const MAX_ENTRIES: usize = 400;
 /// Recency half-life in days: a use "counts half" after this long.
 const HALF_LIFE_DAYS: f64 = 7.0;
-/// Ceiling on the boost so a habitual app can outrank a marginal fuzzy match but
-/// never displaces pins (20_000), quicklinks (6_000) or command hits (~400+).
-const MAX_BOOST: i64 = 250;
+/// Ceiling on the boost. It is [`crate::ranking::BOOST_MAX`], i.e. deliberately
+/// smaller than the gap between two match tiers: history decides *within* a tier
+/// (your most-used "si" app leads the other "si" apps) but can never float a
+/// worse match kind above a better one.
+const MAX_BOOST: i64 = crate::ranking::BOOST_MAX;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Entry {
@@ -91,12 +93,14 @@ impl Frecency {
     }
 }
 
-/// `ln(1+count) * 60 * 0.5^(age_days / half_life)`, capped. Frequent + recent
-/// wins; an old-but-heavy item still gets a small nudge.
+/// `ln(1+count) * 220 * 0.5^(age_days / half_life)`, capped. Frequent + recent
+/// wins; an old-but-heavy item still gets a small nudge. The multiplier is set
+/// so a handful of uses already reaches most of [`MAX_BOOST`] — inside a tier,
+/// habit should decide quickly.
 fn boost_of(e: &Entry, now: i64) -> i64 {
     let age_days = ((now - e.last).max(0) as f64) / 86_400.0;
     let weight = 0.5_f64.powf(age_days / HALF_LIFE_DAYS);
-    let raw = (1.0 + e.count as f64).ln() * 60.0 * weight;
+    let raw = (1.0 + e.count as f64).ln() * 220.0 * weight;
     (raw as i64).min(MAX_BOOST)
 }
 

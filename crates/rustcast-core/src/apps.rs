@@ -3,7 +3,6 @@
 
 use crate::model::{Action, Item, SecondaryAction};
 use crate::provider::{ActionHint, Provider, QueryCtx, Tab};
-use fuzzy_matcher::FuzzyMatcher;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
@@ -13,7 +12,9 @@ pub struct DesktopApp {
     pub exec: String,
     pub icon: String,
     pub subtitle: String,
-    pub haystack: String,
+    /// GenericName + Keywords= — matched only as a weak fallback, never as the
+    /// primary haystack (see [`crate::ranking`]).
+    pub keywords: String,
 }
 
 /// The XDG application directories, most-specific last (user overrides system).
@@ -91,9 +92,9 @@ pub fn parse_desktop(content: &str) -> Option<DesktopApp> {
     if !is_app || no_display || hidden || name.is_empty() || exec.is_empty() {
         return None;
     }
-    let haystack = format!("{name} {generic} {keywords}").to_lowercase();
-    let subtitle = if !generic.is_empty() { generic } else { keywords };
-    Some(DesktopApp { name, exec, icon, subtitle, haystack })
+    let hidden_words = format!("{generic} {keywords}").trim().to_lowercase();
+    let subtitle = generic;
+    Some(DesktopApp { name, exec, icon, subtitle, keywords: hidden_words })
 }
 
 pub fn clean_exec(exec: &str) -> String {
@@ -149,8 +150,12 @@ impl Default for AppsProvider {
     }
 }
 
+/// The cache file name carries a format version: when the column meaning
+/// changes (v2 dropped Keywords= from the subtitle and made it match-only), a
+/// new name makes every install ignore its stale index instead of rendering it
+/// with the wrong meaning until the app dirs happen to change.
 fn cache_path() -> Option<std::path::PathBuf> {
-    crate::config::Config::data_dir().map(|d| d.join("apps-index.tsv"))
+    crate::config::Config::data_dir().map(|d| d.join("apps-index-v2.tsv"))
 }
 
 /// Newest mtime across the app dirs, for staleness checks.
@@ -172,11 +177,11 @@ fn load_cache() -> Vec<DesktopApp> {
             let exec = it.next()?.to_string();
             let icon = it.next().unwrap_or("").to_string();
             let subtitle = it.next().unwrap_or("").to_string();
-            let haystack = it.next().unwrap_or("").to_string();
+            let keywords = it.next().unwrap_or("").to_string();
             if name.is_empty() || exec.is_empty() {
                 return None;
             }
-            Some(DesktopApp { name, exec, icon, subtitle, haystack })
+            Some(DesktopApp { name, exec, icon, subtitle, keywords })
         })
         .collect()
 }
@@ -199,7 +204,7 @@ fn save_cache(apps: &[DesktopApp]) {
         buf.push('\t');
         buf.push_str(&clean(&a.subtitle));
         buf.push('\t');
-        buf.push_str(&clean(&a.haystack));
+        buf.push_str(&clean(&a.keywords));
         buf.push('\n');
     }
     let _ = std::fs::write(p, buf);
@@ -234,13 +239,11 @@ impl Provider for AppsProvider {
         let Ok(apps) = self.apps.read() else { return Vec::new() };
         let mut out = Vec::new();
         for a in apps.iter() {
-            let score = if q.is_empty() {
-                1
-            } else {
-                match ctx.matcher.fuzzy_match(&a.haystack, q) {
-                    Some(s) => s,
-                    None => continue,
-                }
+            // Match the visible name first and treat GenericName/Keywords as a
+            // weak last resort, so "si" finds Signal rather than every app whose
+            // keyword blob happens to contain an s and an i.
+            let Some(score) = crate::ranking::score(ctx.matcher, &a.name, &a.keywords, q) else {
+                continue;
             };
             let icon = if a.icon.is_empty() {
                 "application-x-executable".to_string()
@@ -255,6 +258,7 @@ impl Provider for AppsProvider {
                 score,
                 Action::Launch(a.exec.clone()),
             )
+            .in_section(crate::registry::section::APPLICATIONS)
             .with_actions(vec![SecondaryAction {
                 label: "Copy launch command".into(),
                 action: Action::Copy(clean_exec(&a.exec)),
@@ -278,20 +282,34 @@ mod tests {
             exec: "firefox %u".into(),
             icon: "firefox".into(),
             subtitle: "Web\tBrowser".into(),
-            haystack: "firefox web browser".into(),
+            keywords: "web browser".into(),
         };
         let clean = |s: &str| s.replace(['\t', '\n', '\r'], " ");
         let line = format!(
             "{}\t{}\t{}\t{}\t{}",
-            clean(&a.name), clean(&a.exec), clean(&a.icon), clean(&a.subtitle), clean(&a.haystack)
+            clean(&a.name), clean(&a.exec), clean(&a.icon), clean(&a.subtitle), clean(&a.keywords)
         );
         let mut it = line.split('\t');
         assert_eq!(it.next().unwrap(), "Firefox");
         assert_eq!(it.next().unwrap(), "firefox %u");
         assert_eq!(it.next().unwrap(), "firefox");
         assert_eq!(it.next().unwrap(), "Web Browser"); // tab became space
-        assert_eq!(it.next().unwrap(), "firefox web browser");
+        assert_eq!(it.next().unwrap(), "web browser");
         assert!(it.next().is_none());
+    }
+
+    #[test]
+    fn two_letter_query_puts_the_prefix_match_first() {
+        // Regression: "si" used to bury Signal under every app whose keyword
+        // blob contained an s followed by an i.
+        let names = ["Extension Manager", "Qt Assistant", "Signal", "Obsidian"];
+        let m = crate::ranking::matcher();
+        let mut scored: Vec<(&str, i64)> = names
+            .iter()
+            .filter_map(|n| crate::ranking::score(&m, n, "", "si").map(|s| (*n, s)))
+            .collect();
+        scored.sort_by(|a, b| b.1.cmp(&a.1));
+        assert_eq!(scored[0].0, "Signal");
     }
 
     #[test]

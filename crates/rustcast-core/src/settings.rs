@@ -62,18 +62,12 @@ impl SettingsProvider {
     pub fn new(cfg: &Config) -> Self {
         let cfg_dir = Config::config_dir().map(|p| p.display().to_string()).unwrap_or_default();
         let data_dir = Config::data_dir().map(|p| p.display().to_string()).unwrap_or_default();
-        let target = if cfg.cyber.default_target.is_empty() {
-            "none".into()
-        } else {
-            cfg.cyber.default_target.clone()
-        };
         let lines = vec![
             ("Version".into(), env!("CARGO_PKG_VERSION").to_string()),
             ("Default tab".into(), cfg.general.default_tab.clone()),
             ("Terminal".into(), cfg.general.terminal.clone()),
             ("Window size".into(), format!("{}×{}", cfg.ui.width, cfg.ui.height)),
             ("File roots".into(), cfg.files.roots.join(", ")),
-            ("Cyber target".into(), target),
             ("Quicklinks".into(), cfg.quicklinks.len().to_string()),
             ("Snippets".into(), cfg.snippets.len().to_string()),
             ("Config dir".into(), cfg_dir),
@@ -162,18 +156,16 @@ fn action_rows() -> Vec<(String, String, &'static str, Action)> {
 
 /// Discoverable command reference. The middle field is either `@<provider-id>`
 /// (Enter enters that isolated mode) or a literal prefix like `= ` (Enter drops
-/// it into the box for the cyber toolkit).
+/// it into the search box).
 const COMMANDS: &[(&str, &str, &str)] = &[
     ("Kill Process", "@procs", "browse & terminate processes"),
     ("Window Switcher", "@windows", "jump to an open window"),
     ("Port Inspector", "@ports", "find & kill whatever holds a port"),
     ("Generate Secret", "@gen", "passwords, tokens, UUIDs, PINs"),
+    ("Search tldr", "@tldr", "10k+ command examples"),
     ("Search Cheatsheets", "@cheatsheets", "nmap, tmux, vim, curl…"),
+    ("Add Quicklink", "@add-quicklink", "create a URL/command shortcut"),
     ("Calculator", "= ", "quick math from any tab"),
-    ("Encode / Decode", "b64 ", "base64 / hex / url / rot13"),
-    ("Hash", "hash ", "md5 / sha1 / sha256 / sha512"),
-    ("JWT decode", "jwt ", "inspect a JSON Web Token"),
-    ("Reverse shell", "rev ", "one-liners for host:port"),
 ];
 
 impl Provider for SettingsProvider {

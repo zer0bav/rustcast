@@ -35,7 +35,7 @@ impl Provider for GenProvider {
         "gen"
     }
     fn tab(&self) -> Tab {
-        Tab::Cyber
+        Tab::Apps
     }
     fn placeholder(&self) -> &'static str {
         "Generate a secret… (type a length, e.g. 24)"

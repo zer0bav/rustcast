@@ -33,9 +33,7 @@ pub enum Action {
     OpenFile(String),
     /// Reveal a file in the default file manager.
     RevealFile(String),
-    /// Set the active cyber target (host[:port]).
-    SetTarget(String),
-    /// Replace the search box text (used for prefix tools like `= ` or `b64 `).
+    /// Replace the search box text (used for prefix tools like `= `).
     SetQuery(String),
     /// Enter an isolated command mode routed to the provider whose id is `id`
     /// (e.g. "Kill Process" → id "procs"). The box clears and typing just
@@ -70,6 +68,16 @@ pub enum Prev {
     ImagePath(String),
     /// Rich file metadata block plus an optional text head.
     File { path: String, meta: String, head: Option<String> },
+    /// Raycast-style detail pane: an optional image, an optional body, and a
+    /// key/value metadata table rendered as a grid under a separator.
+    Rich {
+        /// Absolute path to an image to show above the body, if any.
+        image: Option<String>,
+        /// Body text (monospace).
+        text: Option<String>,
+        /// Metadata rows shown as `label — value` pairs at the bottom.
+        meta: Vec<(String, String)>,
+    },
 }
 
 impl Default for Prev {
@@ -92,12 +100,19 @@ pub struct Item {
     pub subtitle: String,
     /// Icon name (freedesktop), absolute `/path`, or empty.
     pub icon: String,
-    /// Right-aligned type label ("app", "clip", "codec", …).
+    /// Right-aligned type label ("app", "clip", "file", …).
     pub tag: String,
     pub score: i64,
     pub action: Action,
     pub prev: Prev,
     pub actions: Vec<SecondaryAction>,
+    /// Group this row belongs to ("Applications", "Commands", "Pinned"…).
+    /// The registry sorts groups by their best hit and inserts a header row per
+    /// group, the way Raycast splits its result list. Empty = ungrouped.
+    pub section: String,
+    /// True for the inserted group-header rows themselves: not selectable, not
+    /// activatable, rendered as a small caption by the GUI.
+    pub header: bool,
 }
 
 impl Item {
@@ -119,6 +134,25 @@ impl Item {
             action,
             prev: Prev::None,
             actions: Vec::new(),
+            section: String::new(),
+            header: false,
+        }
+    }
+
+    /// A non-selectable group header row.
+    pub fn section_header(title: impl Into<String>) -> Self {
+        let title = title.into();
+        Item {
+            title: title.clone(),
+            subtitle: String::new(),
+            icon: String::new(),
+            tag: String::new(),
+            score: 0,
+            action: Action::None,
+            prev: Prev::None,
+            actions: Vec::new(),
+            section: title,
+            header: true,
         }
     }
 
@@ -129,6 +163,12 @@ impl Item {
 
     pub fn with_actions(mut self, actions: Vec<SecondaryAction>) -> Self {
         self.actions = actions;
+        self
+    }
+
+    /// Put this item in a named group (see [`Item::section`]).
+    pub fn in_section(mut self, section: impl Into<String>) -> Self {
+        self.section = section.into();
         self
     }
 }

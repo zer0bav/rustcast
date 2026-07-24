@@ -8,7 +8,6 @@
 
 use crate::model::{Action, Item};
 use crate::provider::{Provider, QueryCtx, Tab};
-use fuzzy_matcher::FuzzyMatcher;
 
 struct Command {
     title: &'static str,
@@ -94,28 +93,28 @@ impl Provider for CommandsProvider {
         Tab::Apps
     }
     fn query(&self, ctx: &QueryCtx) -> Vec<Item> {
-        let q = ctx.query.trim().to_lowercase();
+        let q = ctx.query.trim();
         let mut out = Vec::new();
         for c in COMMANDS {
-            // On the empty root, show every command as a modest cluster; when
-            // searching, fuzzy-match name + keywords and surface strong hits.
-            let score = if q.is_empty() {
-                300
-            } else {
-                let hay = format!("{} {}", c.title, c.keywords).to_lowercase();
-                match ctx.matcher.fuzzy_match(&hay, &q) {
-                    Some(s) => s + 400, // rank commands above generic app matches
-                    None => continue,
-                }
+            // Same tiers as apps, so "kill" hits Kill Process on the prefix tier
+            // and "task manager" still finds it through the keyword tier.
+            let Some(score) = crate::ranking::score(ctx.matcher, c.title, c.keywords, q) else {
+                continue;
             };
-            out.push(Item::new(
-                c.title,
-                c.subtitle,
-                c.icon,
-                "command",
-                score,
-                Action::EnterMode { id: c.mode.to_string(), label: c.title.to_string() },
-            ));
+            // On the empty root, commands sit just under the apps baseline: the
+            // launcher is for launching first, browsing tools second.
+            let score = if q.is_empty() { crate::ranking::IDLE - 100 } else { score };
+            out.push(
+                Item::new(
+                    c.title,
+                    c.subtitle,
+                    c.icon,
+                    "command",
+                    score,
+                    Action::EnterMode { id: c.mode.to_string(), label: c.title.to_string() },
+                )
+                .in_section(crate::registry::section::COMMANDS),
+            );
         }
         out
     }
@@ -129,7 +128,7 @@ mod tests {
     fn keyword_match_finds_command() {
         let p = CommandsProvider::new();
         let m = crate::ranking::matcher();
-        let ctx = QueryCtx { raw: "task manager", query: "task manager", active_tab: Tab::Apps, matcher: &m, target: None, mode: None };
+        let ctx = QueryCtx { raw: "task manager", query: "task manager", active_tab: Tab::Apps, matcher: &m, mode: None };
         let r = p.query(&ctx);
         assert!(r.iter().any(|i| i.title == "Kill Process"));
     }
@@ -138,7 +137,7 @@ mod tests {
     fn empty_shows_all_commands() {
         let p = CommandsProvider::new();
         let m = crate::ranking::matcher();
-        let ctx = QueryCtx { raw: "", query: "", active_tab: Tab::Apps, matcher: &m, target: None, mode: None };
+        let ctx = QueryCtx { raw: "", query: "", active_tab: Tab::Apps, matcher: &m, mode: None };
         assert_eq!(p.query(&ctx).len(), COMMANDS.len());
     }
 }

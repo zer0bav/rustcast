@@ -5,7 +5,6 @@
 use crate::config::which;
 use crate::model::{Action, Item};
 use crate::provider::{Provider, QueryCtx, Tab};
-use fuzzy_matcher::FuzzyMatcher;
 
 struct Cmd {
     title: &'static str,
@@ -115,16 +114,18 @@ impl Provider for SystemProvider {
         }
         let mut out = Vec::new();
         for c in &self.cmds {
-            let hay = format!("{} {}", c.title, c.subtitle).to_lowercase();
-            if let Some(s) = ctx.matcher.fuzzy_match(&hay, &q.to_lowercase()) {
-                out.push(Item::new(
-                    c.title,
-                    c.subtitle,
-                    c.icon,
-                    "system",
-                    s + 20, // nudge above generic app matches
-                    Action::RunShell(c.cmd.clone()),
-                ));
+            if let Some(s) = crate::ranking::score(ctx.matcher, c.title, c.subtitle, q) {
+                out.push(
+                    Item::new(
+                        c.title,
+                        c.subtitle,
+                        c.icon,
+                        "system",
+                        s,
+                        Action::RunShell(c.cmd.clone()),
+                    )
+                    .in_section(crate::registry::section::SYSTEM),
+                );
             }
         }
         out

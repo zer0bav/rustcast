@@ -34,7 +34,6 @@ struct State {
     matcher: fuzzy_matcher::skim::SkimMatcherV2,
     items: RefCell<Vec<Item>>,
     active_tab: Cell<Tab>,
-    target: RefCell<Option<String>>,
     env: Env,
     clip_store: Option<Rc<Store>>,
     /// Active command mode: (provider id, display label). `None` = normal tab.
@@ -103,7 +102,6 @@ fn parse_invocation(args: &[String]) -> Invocation {
         match std::env::var("RUSTCAST_MODE").as_deref() {
             Ok("clipboard") | Ok("clip") | Ok("cb") => tab = Some("clipboard".into()),
             Ok("files") | Ok("file") => tab = Some("files".into()),
-            Ok("cyber") => tab = Some("cyber".into()),
             Ok("calc") => {
                 tab = Some("apps".into());
                 if query.is_none() {
@@ -144,7 +142,7 @@ fn main() {
             "rustcast — a Raycast-class launcher for Linux\n\n\
              USAGE:\n  rustcast [--tab <name>] [--query <text>]\n\n\
              FLAGS:\n\
-             \x20 --tab <apps|clipboard|files|cyber|cheat|windows|extensions>  open on a tab\n\
+             \x20 --tab <apps|clipboard|files|cheat|windows|extensions>  open on a tab\n\
              \x20 --query <text>   pre-fill the search box\n\
              \x20 --daemon         start resident, hidden (for autostart)\n\
              \x20 --quit           stop the resident instance\n\
@@ -294,7 +292,6 @@ fn tab_from_config(s: &str) -> Tab {
     match s.to_lowercase().as_str() {
         "clipboard" | "clip" => Tab::Clipboard,
         "files" | "file" => Tab::Files,
-        "cyber" => Tab::Cyber,
         "cheat" | "cheats" | "cheatsheets" => Tab::Cheat,
         "win" | "windows" | "window" => Tab::Win,
         "extensions" | "ext" => Tab::Extensions,
@@ -361,11 +358,6 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
         matcher: ranking::matcher(),
         items: RefCell::new(Vec::new()),
         active_tab: Cell::new(initial_tab),
-        target: RefCell::new(if cfg.cyber.default_target.is_empty() {
-            None
-        } else {
-            Some(cfg.cyber.default_target.clone())
-        }),
         env: Env { terminal: cfg.general.terminal.clone() },
         clip_store,
         mode: RefCell::new(None),
@@ -470,12 +462,9 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
         .vexpand(true)
         .build();
     text_scroll.set_size_request(336, -1);
-    let prev_meta = Label::builder()
-        .xalign(0.0)
-        .wrap(true)
-        .wrap_mode(gtk4::pango::WrapMode::WordChar)
-        .max_width_chars(46)
-        .build();
+    // Metadata table pinned under the body, Raycast-style: one `label   value`
+    // line per fact, filled by `set_meta_rows`.
+    let prev_meta = GtkBox::new(Orientation::Vertical, 3);
     prev_meta.add_css_class("preview-meta");
     preview.append(&prev_img);
     preview.append(&text_scroll);
@@ -504,12 +493,12 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
             let items = state.items.borrow();
             let Some(it) = items.get(idx) else {
                 prev_lbl.set_text("");
-                prev_meta.set_text("");
+                set_meta_rows(&prev_meta, &[]);
                 prev_img.set_pixel_size(0);
                 prev_img.clear();
                 return;
             };
-            prev_meta.set_text("");
+            set_meta_rows(&prev_meta, &[]);
             match &it.prev {
                 Prev::None => {
                     prev_lbl.set_text("");
@@ -541,11 +530,26 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
                     prev_lbl.set_text("");
                     prev_img.set_pixel_size(320);
                     prev_img.set_from_file(Some(p));
-                    prev_meta.set_text(&it.subtitle);
+                    set_meta_rows(&prev_meta, &[("".into(), it.subtitle.clone())]);
+                }
+                Prev::Rich { image, text, meta } => {
+                    // Body (image or text) on top, metadata table at the bottom.
+                    match image {
+                        Some(p) => {
+                            prev_img.set_pixel_size(300);
+                            prev_img.set_from_file(Some(p));
+                        }
+                        None => {
+                            prev_img.set_pixel_size(0);
+                            prev_img.clear();
+                        }
+                    }
+                    prev_lbl.set_text(text.as_deref().unwrap_or(""));
+                    set_meta_rows(&prev_meta, meta);
                 }
                 Prev::File { path, meta, head } => {
                     // content on top, metadata pinned at the bottom (Raycast style)
-                    prev_meta.set_text(meta);
+                    set_meta_rows(&prev_meta, &[("".into(), meta.clone())]);
                     if let Some(h) = head {
                         prev_img.set_pixel_size(0);
                         prev_img.clear();
@@ -607,13 +611,10 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
         let update_preview = update_preview.clone();
         move |query: &str| {
             let tab = state.active_tab.get();
-            let target = state.target.borrow();
             let mode = state.mode.borrow();
             let mode_id = mode.as_ref().map(|(id, _)| id.as_str());
-            let collected =
-                state.registry.borrow().route(query, tab, &state.matcher, target.as_deref(), mode_id);
+            let collected = state.registry.borrow().route(query, tab, &state.matcher, mode_id);
             drop(mode);
-            drop(target);
 
             // Reuse pooled row widgets: update the first N in place, attach any
             // we're missing, and detach the surplus — no per-keystroke teardown.
@@ -636,11 +637,9 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
                 state.attached.set(n);
             }
             *state.items.borrow_mut() = collected;
-            if let Some(first) = list.row_at_index(0) {
-                list.select_row(Some(&first));
-                update_preview(0);
-            } else {
-                update_preview(usize::MAX);
+            match select_first(&list) {
+                Some(i) => update_preview(i),
+                None => update_preview(usize::MAX),
             }
         }
     };
@@ -650,7 +649,7 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
     // Preview pane is only meaningful on content tabs; hide it elsewhere for a
     // minimal single-column (rofi-style) look. Clipboard always keeps it.
     fn tab_shows_preview(tab: Tab) -> bool {
-        matches!(tab, Tab::Clipboard | Tab::Files | Tab::Cheat | Tab::Cyber)
+        matches!(tab, Tab::Clipboard | Tab::Files | Tab::Cheat)
     }
 
     let switch_tab = {
@@ -711,6 +710,18 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
         });
     }
 
+    // ── click / double-click a row ──────────────────────────
+    {
+        let state = state.clone();
+        let entry_c = entry.clone();
+        let win_c = window.clone();
+        let rebuild_c = rebuild.clone();
+        let list_c = list.clone();
+        list.connect_row_activated(move |_, _| {
+            activate_selected(&state, &list_c, &entry_c, &win_c, &rebuild_c);
+        });
+    }
+
     // ── keyboard ────────────────────────────────────────────
     {
         let state = state.clone();
@@ -756,16 +767,15 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
                     switch_tab(Tab::from_index(prev).unwrap());
                     Propagation::Stop
                 }
-                // direct tab jump: Ctrl+1..7
-                Key::_1 | Key::_2 | Key::_3 | Key::_4 | Key::_5 | Key::_6 | Key::_7 if ctrl => {
+                // direct tab jump: Ctrl+1..6
+                Key::_1 | Key::_2 | Key::_3 | Key::_4 | Key::_5 | Key::_6 if ctrl => {
                     let n = match keyval {
                         Key::_1 => 0,
                         Key::_2 => 1,
                         Key::_3 => 2,
                         Key::_4 => 3,
                         Key::_5 => 4,
-                        Key::_6 => 5,
-                        _ => 6,
+                        _ => 5,
                     };
                     if let Some(t) = Tab::from_index(n) {
                         switch_tab(t);
@@ -792,6 +802,25 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
                 // actions menu
                 Key::k if ctrl => {
                     open_actions_menu(&state, &list, &entry, &win, &rebuild);
+                    Propagation::Stop
+                }
+                // clipboard: delete / pin the highlighted entry in place
+                Key::d | Key::D if ctrl => {
+                    apply_selected_secondary(&state, &list, &entry, &win, &rebuild, |a| {
+                        matches!(a, Action::ClipDelete(_))
+                    });
+                    Propagation::Stop
+                }
+                Key::Delete | Key::BackSpace if shift => {
+                    apply_selected_secondary(&state, &list, &entry, &win, &rebuild, |a| {
+                        matches!(a, Action::ClipDelete(_))
+                    });
+                    Propagation::Stop
+                }
+                Key::s | Key::S if ctrl => {
+                    apply_selected_secondary(&state, &list, &entry, &win, &rebuild, |a| {
+                        matches!(a, Action::ClipPin(_))
+                    });
                     Propagation::Stop
                 }
                 // clear
@@ -881,7 +910,7 @@ impl Ui {
             *self.state.registry.borrow_mut() = reg;
         }
 
-        // Reset any command mode / target back to a clean root.
+        // Reset any command mode back to a clean root.
         *self.state.mode.borrow_mut() = None;
         self.entry.remove_css_class("mode-active");
 
@@ -917,6 +946,46 @@ impl Ui {
     }
 }
 
+/// Run the selected item's first secondary action for which `pick` returns true
+/// — the clipboard's ⌃D (delete) / ⌃S (pin) shortcuts, without a trip through
+/// the actions menu. Returns whether such an action existed.
+///
+/// The list is rebuilt by the action itself (an entry disappears, or its pin
+/// flips), so the selection is restored to the same position afterwards: deleting
+/// five entries in a row shouldn't send you back to the top each time.
+fn apply_selected_secondary(
+    state: &Rc<State>,
+    list: &ListBox,
+    entry: &Entry,
+    win: &ApplicationWindow,
+    rebuild: &Rc<dyn Fn(&str)>,
+    pick: impl Fn(&Action) -> bool,
+) -> bool {
+    let Some(row) = list.selected_row() else { return false };
+    let i = row.index();
+    if i < 0 {
+        return false;
+    }
+    let action = {
+        let items = state.items.borrow();
+        let Some(it) = items.get(i as usize) else { return false };
+        it.actions.iter().find(|sa| pick(&sa.action)).map(|sa| sa.action.clone())
+    };
+    let Some(action) = action else { return false };
+    apply_action(state, &action, entry, win, rebuild);
+
+    // Land on whatever took the old row's place — scanning down a couple of rows
+    // in case a section header slid in, then back up if the list got shorter.
+    let selectable = |n: i32| list.row_at_index(n).filter(|r| r.is_selectable());
+    match (i..=i + 2).find_map(selectable).or_else(|| (0..=i).rev().find_map(selectable)) {
+        Some(r) => list.select_row(Some(&r)),
+        None => {
+            select_first(list);
+        }
+    }
+    true
+}
+
 /// Run the selected item's primary action.
 fn activate_selected(
     state: &Rc<State>,
@@ -948,14 +1017,8 @@ fn apply_action(
     rebuild: &Rc<dyn Fn(&str)>,
 ) {
     match action {
-        Action::SetTarget(t) => {
-            *state.target.borrow_mut() = Some(t.clone());
-            entry.set_text("");
-            rebuild("");
-            return;
-        }
         Action::SetQuery(text) => {
-            // Drop a prefix into the box (cyber toolkit: `= `, `b64 `, …).
+            // Drop a prefix into the box (e.g. the calculator's `= `).
             entry.set_text(text);
             entry.set_position(-1);
             entry.grab_focus();
@@ -1172,25 +1235,71 @@ fn open_actions_menu(
     popover.popup();
 }
 
+/// Fill the preview's metadata table: one `label            value` line per
+/// entry, dim label on the left, value right-aligned. An entry with an empty
+/// label renders as a single full-width line (used for the plain-string metadata
+/// the file preview still produces). An empty slice clears the table.
+fn set_meta_rows(container: &GtkBox, rows: &[(String, String)]) {
+    while let Some(c) = container.first_child() {
+        container.remove(&c);
+    }
+    container.set_visible(!rows.is_empty());
+    for (label, value) in rows {
+        let line = GtkBox::new(Orientation::Horizontal, 10);
+        if label.is_empty() {
+            let v = Label::builder()
+                .label(value)
+                .xalign(0.0)
+                .wrap(true)
+                .wrap_mode(gtk4::pango::WrapMode::WordChar)
+                .max_width_chars(46)
+                .build();
+            v.add_css_class("meta-value");
+            line.append(&v);
+        } else {
+            let k = Label::builder().label(label).xalign(0.0).build();
+            k.add_css_class("meta-key");
+            let v = Label::builder()
+                .label(value)
+                .xalign(1.0)
+                .hexpand(true)
+                .ellipsize(gtk4::pango::EllipsizeMode::Middle)
+                .build();
+            v.add_css_class("meta-value");
+            line.append(&k);
+            line.append(&v);
+        }
+        container.append(&line);
+    }
+}
+
 /// Build one empty, reusable result row. Content is filled by [`update_row`].
 fn make_row() -> RowWidget {
     let row = ListBoxRow::new();
-    let hb = GtkBox::new(Orientation::Horizontal, 12);
+    // Single-line rows (icon · title · dim subtitle · right-aligned tag): more
+    // results fit on screen and the eye scans one column of titles.
+    let hb = GtkBox::new(Orientation::Horizontal, 10);
     hb.add_css_class("row-inner");
     let icon = Image::new();
-    icon.set_pixel_size(26);
-    let tb = GtkBox::new(Orientation::Vertical, 0);
-    tb.set_hexpand(true);
-    let title = Label::builder().xalign(0.0).ellipsize(gtk4::pango::EllipsizeMode::End).build();
+    icon.set_pixel_size(20);
+    let title = Label::builder()
+        .xalign(0.0)
+        .valign(Align::Center)
+        .ellipsize(gtk4::pango::EllipsizeMode::End)
+        .build();
     title.add_css_class("app-title");
-    let sub = Label::builder().xalign(0.0).ellipsize(gtk4::pango::EllipsizeMode::End).build();
+    let sub = Label::builder()
+        .xalign(0.0)
+        .valign(Align::Center)
+        .hexpand(true)
+        .ellipsize(gtk4::pango::EllipsizeMode::End)
+        .build();
     sub.add_css_class("app-sub");
-    tb.append(&title);
-    tb.append(&sub);
     let tag = Label::builder().xalign(1.0).valign(Align::Center).build();
     tag.add_css_class("app-tag");
     hb.append(&icon);
-    hb.append(&tb);
+    hb.append(&title);
+    hb.append(&sub);
     hb.append(&tag);
     row.set_child(Some(&hb));
     RowWidget { row, icon, title, sub, tag, drag: RefCell::new(None) }
@@ -1199,6 +1308,34 @@ fn make_row() -> RowWidget {
 /// Update a pooled row to show `it` — mutates labels/icon in place instead of
 /// rebuilding widgets, and swaps the file drag-source as needed.
 fn update_row(rw: &RowWidget, it: &Item) {
+    // Group headers ("Applications", "Pinned"…) are captions, not results: no
+    // icon, no selection, skipped by the arrow keys (see `move_sel`).
+    if it.header {
+        rw.row.add_css_class("section-header");
+        rw.row.set_selectable(false);
+        rw.row.set_activatable(false);
+        rw.icon.clear();
+        rw.icon.set_visible(false);
+        // GTK CSS has no text-transform, so the caps happen here.
+        rw.title.set_ellipsize(gtk4::pango::EllipsizeMode::None);
+        rw.title.set_text(&it.title.to_uppercase());
+        rw.title.remove_css_class("app-title");
+        rw.title.add_css_class("section-title");
+        rw.sub.set_visible(false);
+        rw.tag.set_text("");
+        if let Some(old) = rw.drag.borrow_mut().take() {
+            rw.row.remove_controller(&old);
+        }
+        return;
+    }
+    rw.row.remove_css_class("section-header");
+    rw.row.set_selectable(true);
+    rw.row.set_activatable(true);
+    rw.icon.set_visible(true);
+    rw.title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    rw.title.remove_css_class("section-title");
+    rw.title.add_css_class("app-title");
+
     if it.icon.starts_with('/') {
         rw.icon.set_from_file(Some(&it.icon));
     } else if it.icon.is_empty() {
@@ -1207,12 +1344,10 @@ fn update_row(rw: &RowWidget, it: &Item) {
         rw.icon.set_icon_name(Some(&it.icon));
     }
     rw.title.set_text(&it.title);
-    if it.subtitle.is_empty() {
-        rw.sub.set_visible(false);
-    } else {
-        rw.sub.set_text(&it.subtitle);
-        rw.sub.set_visible(true);
-    }
+    // The subtitle stays in the layout even when empty: it is the expanding
+    // spacer that keeps the tag pinned to the right edge.
+    rw.sub.set_text(&it.subtitle);
+    rw.sub.set_visible(true);
     rw.tag.set_text(&it.tag);
 
     // Drag-out: file results can be dragged into other apps as a real file.
@@ -1356,21 +1491,54 @@ fn clip_image_temp(line: &str) -> Option<String> {
     }
 }
 
+/// Move the selection by `delta`, stepping over the non-selectable section
+/// headers so ↑/↓ only ever lands on a real result.
 fn move_sel(list: &ListBox, scroll: &ScrolledWindow, delta: i32) {
     let cur = list.selected_row().map(|r| r.index()).unwrap_or(0);
-    let next = (cur + delta).max(0);
-    if let Some(row) = list.row_at_index(next) {
-        list.select_row(Some(&row));
-        let adj = scroll.vadjustment();
-        let alloc = row.allocation();
-        let (y, h) = (alloc.y() as f64, alloc.height() as f64);
-        let (val, page) = (adj.value(), adj.page_size());
-        if y < val {
-            adj.set_value(y);
-        } else if y + h > val + page {
-            adj.set_value((y + h - page).max(0.0));
+    let step = if delta >= 0 { 1 } else { -1 };
+    let mut next = cur + delta;
+    let row = loop {
+        if next < 0 {
+            return;
         }
+        let Some(row) = list.row_at_index(next) else { return };
+        if row.is_selectable() {
+            break row;
+        }
+        next += step;
+    };
+    list.select_row(Some(&row));
+    scroll_into_view(scroll, &row);
+}
+
+/// Scroll `row` into the viewport, keeping a section header visible above the
+/// first row of its group.
+fn scroll_into_view(scroll: &ScrolledWindow, row: &ListBoxRow) {
+    let adj = scroll.vadjustment();
+    let alloc = row.allocation();
+    let (y, h) = (alloc.y() as f64, alloc.height() as f64);
+    let (val, page) = (adj.value(), adj.page_size());
+    // A little headroom so the group caption above the row stays on screen.
+    const HEADROOM: f64 = 26.0;
+    if y - HEADROOM < val {
+        adj.set_value((y - HEADROOM).max(0.0));
+    } else if y + h > val + page {
+        adj.set_value((y + h - page).max(0.0));
     }
+}
+
+/// Select the first selectable row (skipping a leading section header) and
+/// return its index, or `None` when the list holds no results.
+fn select_first(list: &ListBox) -> Option<usize> {
+    let mut i = 0;
+    while let Some(row) = list.row_at_index(i) {
+        if row.is_selectable() {
+            list.select_row(Some(&row));
+            return Some(i as usize);
+        }
+        i += 1;
+    }
+    None
 }
 
 /// Load the stylesheet: user's `~/.config/rustcast/style.css`, an explicit

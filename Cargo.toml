@@ -3,10 +3,11 @@ resolver = "2"
 members = ["crates/rustcast-core", "crates/rustcast-gui"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
+authors = ["zer0bav <baverozmen@proton.me>"]
 edition = "2021"
 license = "MIT"
-description = "Raycast-class Wayland launcher in Rust — fast, scriptable, cybersec-focused"
+description = "Raycast-class launcher for Linux in Rust — fast, keyboard-driven, scriptable"
 
 [workspace.dependencies]
 fuzzy-matcher = "0.3"

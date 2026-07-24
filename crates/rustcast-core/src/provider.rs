@@ -13,22 +13,20 @@ pub enum Tab {
     Apps,
     Clipboard,
     Files,
-    Cyber,
     Cheat,
     Win,
     Extensions,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 7] =
-        [Tab::Apps, Tab::Clipboard, Tab::Files, Tab::Cyber, Tab::Cheat, Tab::Win, Tab::Extensions];
+    pub const ALL: [Tab; 6] =
+        [Tab::Apps, Tab::Clipboard, Tab::Files, Tab::Cheat, Tab::Win, Tab::Extensions];
 
     pub fn label(self) -> &'static str {
         match self {
             Tab::Apps => "Apps",
             Tab::Clipboard => "Clipboard",
             Tab::Files => "Files",
-            Tab::Cyber => "Cyber",
             Tab::Cheat => "Cheats",
             Tab::Win => "Windows",
             Tab::Extensions => "Extensions",
@@ -45,14 +43,12 @@ impl Tab {
 }
 
 /// Shared state threaded into every query: the raw entry text, the query with
-/// any tab/prefix scoping stripped, the active tab, a fuzzy matcher, and the
-/// current cyber target.
+/// any tab/prefix scoping stripped, the active tab, and the fuzzy matcher.
 pub struct QueryCtx<'a> {
     pub raw: &'a str,
     pub query: &'a str,
     pub active_tab: Tab,
     pub matcher: &'a SkimMatcherV2,
-    pub target: Option<&'a str>,
     /// When set, an isolated command mode is active and the query routes only to
     /// the provider whose [`Provider::id`] equals this. Tool providers (process
     /// killer, window switcher, secret generator, port inspector) respond only
