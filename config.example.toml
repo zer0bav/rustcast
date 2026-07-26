@@ -5,7 +5,11 @@
 width = 900
 height = 560
 animations = true
-# theme = "/path/to/custom/style.css"   # else ~/.config/rustcast/style.css, else bundled
+# theme = "gruvbox"                     # bundled: "gruvbox" (default) | "tbsr" | "cyberdeck"
+#                                       #   tbsr      = anime frosted-pastel OPSEC HUD (Waybar parity)
+#                                       #   cyberdeck = square teal/blue bracket bar (Waybar parity)
+#                                       # cycle live with Ctrl+T
+# theme = "/path/to/custom/style.css"   # or a path; else ~/.config/rustcast/style.css, else bundled
 
 [general]
 default_tab = "apps"          # apps | clipboard | files | cheat | windows | extensions

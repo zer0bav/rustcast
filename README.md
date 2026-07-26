@@ -169,6 +169,7 @@ your compositor, bind `rustcast --no-daemon` for the classic one-shot mode.
 - Type to search; `↑`/`↓` (or `Ctrl+J/K`) to move; `Enter` to run.
 - `Tab` / `Shift+Tab` cycle tabs; `Ctrl+1..6` jump to one.
 - `Ctrl+K` opens the actions menu (copy, delete, pin, reveal, force-kill, …).
+- `Ctrl+T` cycles the bundled themes live (gruvbox → tbsr → cyberdeck).
 - `Esc` clears the query, then closes.
 
 **Clipboard tab** — `Enter` copies the entry back, `Ctrl+D` deletes it,

@@ -402,7 +402,10 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
         });
     }
 
-    load_css(&cfg);
+    let (css_provider, theme_idx) = load_css(&cfg);
+    // Shared theme state so Ctrl+T can cycle bundled themes at runtime.
+    let css_provider = Rc::new(css_provider);
+    let theme_idx = Rc::new(Cell::new(theme_idx));
 
     // ── layout ──────────────────────────────────────────────
     let root = GtkBox::new(Orientation::Vertical, 0);
@@ -731,6 +734,8 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
         let win = window.clone();
         let switch_tab = switch_tab.clone();
         let rebuild = rebuild.clone();
+        let css_provider = css_provider.clone();
+        let theme_idx = theme_idx.clone();
         let key = EventControllerKey::new();
         key.set_propagation_phase(gtk4::PropagationPhase::Capture);
         key.connect_key_pressed(move |_, keyval, _, mods| {
@@ -826,6 +831,13 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
                 // clear
                 Key::u if ctrl => {
                     entry.set_text("");
+                    Propagation::Stop
+                }
+                // cycle bundled themes live: gruvbox → tbsr → cyberdeck → …
+                Key::t | Key::T if ctrl => {
+                    let next = (theme_idx.get() + 1) % BUNDLED_THEMES.len();
+                    theme_idx.set(next);
+                    css_provider.load_from_data(BUNDLED_THEMES[next].1);
                     Propagation::Stop
                 }
                 Key::Return | Key::KP_Enter => {
@@ -1541,22 +1553,67 @@ fn select_first(list: &ListBox) -> Option<usize> {
     None
 }
 
-/// Load the stylesheet: user's `~/.config/rustcast/style.css`, an explicit
-/// `[ui].theme` path, or the bundled default.
-fn load_css(cfg: &Config) {
-    let provider = CssProvider::new();
-    if !cfg.ui.theme.is_empty() && std::path::Path::new(&cfg.ui.theme).exists() {
-        provider.load_from_path(&cfg.ui.theme);
-    } else if let Some(p) = Config::user_css() {
-        provider.load_from_path(&p);
-    } else {
-        // Embed the default theme at compile time so the binary is self-contained
-        // (a packaged/installed binary has no source tree to read from).
-        const DEFAULT_CSS: &str =
-            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/style.css"));
-        provider.load_from_data(DEFAULT_CSS);
+const DEFAULT_CSS: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/style.css"));
+const TBSR_CSS: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/theme-tbsr.css"));
+const CYBERDECK_CSS: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/theme-cyberdeck.css"));
+
+/// Bundled themes, in the order Ctrl+T cycles through them.
+const BUNDLED_THEMES: &[(&str, &str)] = &[
+    ("gruvbox", DEFAULT_CSS),
+    ("tbsr", TBSR_CSS),
+    ("cyberdeck", CYBERDECK_CSS),
+];
+
+/// Resolve a `[ui].theme` value to a bundled theme index, treating aliases
+/// gracefully. Returns `None` for empty/custom-path values (→ index 0).
+fn theme_index(name: &str) -> Option<usize> {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "default" | "gruvbox" => Some(0),
+        "tbsr" | "waybar" | "anime" => Some(1),
+        "cyberdeck" | "deck" => Some(2),
+        _ => None,
     }
+}
+
+/// Load the stylesheet into a fresh persistent provider and return it together
+/// with the active bundled-theme index (for Ctrl+T cycling). `[ui].theme`
+/// accepts a bundled theme *name* (gruvbox | tbsr | cyberdeck, plus aliases) or
+/// a path to a custom `.css`; empty falls back to `~/.config/rustcast/style.css`
+/// then the bundled default. All bundled themes are embedded at compile time so
+/// the binary is self-contained (a packaged install has no source tree to read).
+fn load_css(cfg: &Config) -> (CssProvider, usize) {
+    let provider = CssProvider::new();
+    let theme = cfg.ui.theme.trim();
+    let idx = match theme_index(theme) {
+        Some(i) => {
+            // gruvbox may still be overridden by the user's own style.css
+            if i == 0 {
+                match Config::user_css().filter(|p| p.exists()) {
+                    Some(p) => provider.load_from_path(&p),
+                    None => provider.load_from_data(BUNDLED_THEMES[0].1),
+                }
+            } else {
+                provider.load_from_data(BUNDLED_THEMES[i].1);
+            }
+            i
+        }
+        None if !theme.is_empty() && std::path::Path::new(theme).exists() => {
+            provider.load_from_path(theme);
+            0
+        }
+        None => {
+            match Config::user_css().filter(|p| p.exists()) {
+                Some(p) => provider.load_from_path(&p),
+                None => provider.load_from_data(DEFAULT_CSS),
+            }
+            0
+        }
+    };
     if let Some(d) = Display::default() {
         gtk4::style_context_add_provider_for_display(&d, &provider, STYLE_PROVIDER_PRIORITY_APPLICATION);
     }
+    (provider, idx)
 }

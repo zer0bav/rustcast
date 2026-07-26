@@ -1,0 +1,223 @@
+/* rustcast — "cyberdeck" theme (v1.0)
+   Mirrors the cyberdeck Waybar look: square segments (radius 2), 2px blue
+   frame #61afef, dark #282c34 ground, soft cyan #9cdef2, teal #56b6c2, peach
+   active accent #fab387. Palette parity with
+   ~/.config/waybar/style/cyberdeck.css */
+
+@define-color bg          #282c34;
+@define-color surface     #292d35;
+@define-color surface2    #2e3440;
+@define-color text        #9cdef2;
+@define-color muted       #7fb8cc;
+@define-color faint       #565f73;
+@define-color frame       #61afef;   /* blue segment border */
+@define-color teal        #56b6c2;
+@define-color peach       #fab387;
+@define-color red         #e06c75;
+
+window { background: transparent; }
+
+/* bar body: solid dark, 2px teal frame, square corners */
+.box-wrapper {
+  background: @bg;
+  border: 2px solid @teal;
+  border-radius: 2px;
+  padding: 8px 8px 6px 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+}
+
+/* ── tab bar ─────────────────────────────────────────── */
+.tab-bar {
+  padding: 2px 2px 8px 2px;
+}
+/* each tab = a bracketed cyberdeck segment: square, 2px blue frame */
+.tab {
+  background: @surface;
+  color: @text;
+  border: 2px solid @frame;
+  box-shadow: none;
+  border-radius: 2px;
+  padding: 3px 11px;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 12px;
+  font-weight: bold;
+  min-height: 0;
+  transition: background 200ms ease, color 200ms ease;
+}
+.tab:hover {
+  background: @surface2;
+  color: #cdeefb;
+}
+/* active tab = the active-workspace pill: peach ink on teal fill */
+.tab-active {
+  background: @teal;
+  color: @peach;
+  border-color: @teal;
+}
+.tab-active:hover {
+  background: @teal;
+  color: @peach;
+}
+
+/* ── search input ────────────────────────────────────── */
+.input {
+  background: @surface;
+  color: @text;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 16px;
+  padding: 11px 14px;
+  border: 2px solid @frame;
+  border-radius: 2px;
+  margin-bottom: 8px;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+.input:focus,
+.input:focus-within {
+  outline: none;
+  border-color: @teal;
+  box-shadow: 0 0 0 2px rgba(86, 182, 194, 0.35);
+}
+.input > text { background: transparent; }
+.input > text > placeholder { color: @faint; }
+/* active command mode: red left frame — the "hot" segment accent */
+.input.mode-active {
+  border-color: @red;
+  border-left-width: 4px;
+}
+
+/* ── result list ─────────────────────────────────────── */
+.list, .list-scroll { background: transparent; }
+
+row {
+  padding: 0;
+  border-radius: 2px;
+  margin: 2px 0;
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+.row-inner { padding: 6px 10px; }
+/* selected row = a lit cyberdeck segment: dark fill + teal frame + peach rail */
+row:selected {
+  background: @surface2;
+  box-shadow: inset 0 0 0 2px @teal,
+              inset 4px 0 0 @peach;
+}
+
+/* group captions ("Suggestions", "Applications", "Pinned"…) */
+row.section-header {
+  background: transparent;
+  box-shadow: none;
+  margin: 8px 0 1px 0;
+}
+row.section-header:first-child { margin-top: 1px; }
+row.section-header .row-inner { padding: 2px 10px; }
+.section-title {
+  color: @teal;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 1.4px;
+}
+
+.app-title {
+  color: @text;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 13px;
+}
+.app-sub {
+  color: @faint;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 11px;
+  padding-left: 4px;
+}
+.app-tag {
+  color: @faint;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 10px;
+  padding-left: 8px;
+  letter-spacing: 0.5px;
+}
+row:selected .app-title { color: @peach; }
+row:selected .app-sub   { color: @muted; }
+
+/* ── preview pane ────────────────────────────────────── */
+.preview {
+  background: @surface;
+  border: 2px solid @frame;
+  border-radius: 2px;
+  padding: 12px;
+}
+.preview-text {
+  color: @text;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 12px;
+}
+/* metadata table under the preview body */
+.preview-meta {
+  padding-top: 10px;
+  margin-top: 8px;
+  border-top: 2px solid @frame;
+}
+.meta-key {
+  color: @faint;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 11px;
+}
+.meta-value {
+  color: @teal;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 11px;
+}
+
+/* ── footer action chips ─────────────────────────────── */
+.footer {
+  padding: 8px 4px 2px 4px;
+  margin-top: 6px;
+  border-top: 2px solid @frame;
+}
+.chip {
+  opacity: 0.95;
+}
+.chip-key {
+  color: @bg;
+  background: @teal;
+  border-radius: 2px;
+  padding: 1px 6px;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 11px;
+  font-weight: bold;
+}
+.chip-label {
+  color: @muted;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 11px;
+}
+
+/* slide-in on tab/selection change */
+@keyframes footer-slide {
+  from { opacity: 0; margin-left: 18px; }
+  to   { opacity: 1; margin-left: 0; }
+}
+.footer.slidein {
+  animation: footer-slide 180ms ease-out;
+}
+
+/* ── actions menu popover ────────────────────────────── */
+.actions-menu {
+  background: @bg;
+  border: 2px solid @frame;
+  border-radius: 2px;
+  padding: 4px;
+}
+.action-row {
+  color: @text;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 13px;
+  padding: 7px 12px;
+  border-radius: 2px;
+}
+.action-row:selected {
+  background: @teal;
+  color: @bg;
+}
+
+scrollbar { opacity: 0; }
