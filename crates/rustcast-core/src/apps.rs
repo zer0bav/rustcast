@@ -47,6 +47,13 @@ pub fn load_apps() -> Vec<DesktopApp> {
             }
             let Ok(content) = std::fs::read_to_string(&path) else { continue };
             if let Some(a) = parse_desktop(&content) {
+                // Skip entries whose binary is gone: uninstalling an app often
+                // leaves a stale `.desktop` behind (e.g. a leftover copy in
+                // ~/.local/share/applications), and without this check we'd keep
+                // offering to launch something that no longer exists.
+                if !exec_exists(&a.exec) {
+                    continue;
+                }
                 if seen.insert(a.name.clone()) {
                     apps.push(a);
                 }
@@ -102,6 +109,29 @@ pub fn clean_exec(exec: &str) -> String {
         .filter(|t| !(t.starts_with('%') && t.len() == 2))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Does the program this entry launches actually exist? Resolves the first
+/// non-field-code token of `Exec` (quotes stripped): an absolute/relative path
+/// must exist on disk, a bare name must be found on `$PATH`. Used to filter out
+/// stale `.desktop` files left behind by uninstalled apps.
+pub fn exec_exists(exec: &str) -> bool {
+    let Some(prog) = clean_exec(exec)
+        .split_whitespace()
+        .next()
+        .map(|t| t.trim_matches(['"', '\'']).to_string())
+    else {
+        return false;
+    };
+    if prog.is_empty() {
+        return false;
+    }
+    if prog.contains('/') {
+        return std::path::Path::new(&prog).exists();
+    }
+    let Ok(path) = std::env::var("PATH") else { return false };
+    path.split(':')
+        .any(|dir| !dir.is_empty() && std::path::Path::new(dir).join(&prog).exists())
 }
 
 const APP_HINTS: &[ActionHint] = &[
