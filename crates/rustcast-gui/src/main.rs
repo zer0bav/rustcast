@@ -850,6 +850,25 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
         window.add_controller(key);
     }
 
+    // Close the show-time keyboard-focus race. On a layer-shell surface the
+    // compositor only grants keyboard focus once the surface is mapped, but
+    // `show_with` asserts KeyboardMode::Exclusive + grab_focus *before*
+    // `present()` (i.e. before the map). Across the resident hide/show cycle
+    // that first assertion is sometimes dropped, so the first ↑/↓/Enter after
+    // opening lands on a surface hyprland hasn't focused yet and is swallowed —
+    // "sometimes the arrow key works, sometimes it doesn't". Re-asserting on
+    // every `map` (which fires each time the window becomes visible) makes the
+    // focus deterministic.
+    {
+        let entry = entry.clone();
+        window.connect_map(move |w| {
+            if layer {
+                w.set_keyboard_mode(KeyboardMode::Exclusive);
+            }
+            entry.grab_focus();
+        });
+    }
+
     // Live refresh ticker (700 ms): while the Clipboard tab is open, pick up
     // newly copied entries; while the Cheat tab is open and a tldr download is
     // running, repaint when it finishes — both without needing a keystroke.
