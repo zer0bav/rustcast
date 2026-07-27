@@ -114,6 +114,34 @@ fn parse_invocation(args: &[String]) -> Invocation {
     Invocation::Show { tab, query }
 }
 
+/// Append a line to `$XDG_CACHE_HOME/rustcast/daemon.log` when `RUSTCAST_LOG`
+/// is set — a no-op otherwise, so it costs nothing in normal use. Records every
+/// show and every key press to diagnose the intermittent "keys stop after
+/// hours" report: if a failed keypress leaves no `key …` line the compositor
+/// stopped delivering input (focus/layer-shell); if the line is there but
+/// nothing happened the fault is in our handling.
+fn dlog(msg: &str) {
+    use std::io::Write;
+    if std::env::var_os("RUSTCAST_LOG").is_none() {
+        return;
+    }
+    let Some(dir) = std::env::var_os("XDG_CACHE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")))
+        .map(|c| c.join("rustcast"))
+    else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(&dir);
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("daemon.log")) {
+        let _ = writeln!(f, "{secs} {msg}");
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
@@ -741,6 +769,10 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
         key.connect_key_pressed(move |_, keyval, _, mods| {
             let ctrl = mods.contains(ModifierType::CONTROL_MASK);
             let shift = mods.contains(ModifierType::SHIFT_MASK);
+            dlog(&format!(
+                "key {} ctrl={ctrl} shift={shift}",
+                keyval.name().map(|s| s.to_string()).unwrap_or_default()
+            ));
             match keyval {
                 Key::Escape => {
                     let in_mode = state.mode.borrow().is_some();
@@ -866,6 +898,7 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
                 w.set_keyboard_mode(KeyboardMode::Exclusive);
             }
             entry.grab_focus();
+            dlog("map: reasserted keyboard mode + focus");
         });
     }
 
@@ -978,6 +1011,11 @@ impl Ui {
         }
         self.entry.grab_focus();
         self.window.present();
+        dlog(&format!(
+            "show: present visible={} focus={}",
+            self.window.is_visible(),
+            self.entry.has_focus()
+        ));
     }
 
     fn hide(&self) {
