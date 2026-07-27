@@ -507,7 +507,7 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
                     prev_lbl.set_text("");
                     prev_img.set_pixel_size(120);
                     if it.icon.starts_with('/') {
-                        prev_img.set_from_file(Some(&it.icon));
+                        set_scaled_image(&prev_img, &it.icon, 128);
                     } else {
                         prev_img.set_icon_name(Some(&it.icon));
                     }
@@ -526,13 +526,13 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
                     prev_lbl.set_text("");
                     prev_img.set_pixel_size(320);
                     if let Some(p) = clip_image_temp(line) {
-                        prev_img.set_from_file(Some(&p));
+                        set_scaled_image(&prev_img, &p, 320);
                     }
                 }
                 Prev::ImagePath(p) => {
                     prev_lbl.set_text("");
                     prev_img.set_pixel_size(320);
-                    prev_img.set_from_file(Some(p));
+                    set_scaled_image(&prev_img, p, 320);
                     set_meta_rows(&prev_meta, &[("".into(), it.subtitle.clone())]);
                 }
                 Prev::Rich { image, text, meta } => {
@@ -540,7 +540,7 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
                     match image {
                         Some(p) => {
                             prev_img.set_pixel_size(300);
-                            prev_img.set_from_file(Some(p));
+                            set_scaled_image(&prev_img, p, 300);
                         }
                         None => {
                             prev_img.set_pixel_size(0);
@@ -560,7 +560,7 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
                     } else if !path.is_empty() && is_image_path(path) {
                         prev_lbl.set_text("");
                         prev_img.set_pixel_size(300);
-                        prev_img.set_from_file(Some(path));
+                        set_scaled_image(&prev_img, path, 300);
                     } else if !path.is_empty() {
                         prev_img.set_pixel_size(0);
                         prev_img.clear();
@@ -876,11 +876,23 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
         let state = state.clone();
         let entry_r = entry.clone();
         let rebuild_r = rebuild.clone();
+        let window_t = window.clone();
         let last_id = std::cell::Cell::new(
             state.clip_store.as_ref().and_then(|s| s.recent(1).first().map(|r| r.id)).unwrap_or(-1),
         );
         let was_downloading = std::cell::Cell::new(false);
         glib::timeout_add_local(std::time::Duration::from_millis(700), move || {
+            // Do nothing while the launcher is hidden. In resident mode the
+            // process lives for days; without this guard, every clipboard copy
+            // (with the Clipboard tab last-active) rebuilds the list behind the
+            // invisible window — and rebuild reloads the selected entry's image
+            // preview into a texture via set_from_file. Copying images all day
+            // then grows RSS unbounded (observed ~300 MB after hours) and, once
+            // the box bloats, the compositor/main-loop starves and input starts
+            // dropping. Repaint on the next real show instead.
+            if resident && !window_t.is_visible() {
+                return glib::ControlFlow::Continue;
+            }
             match state.active_tab.get() {
                 Tab::Clipboard => {
                     if let Some(store) = &state.clip_store {
@@ -1501,6 +1513,20 @@ fn read_file_head(path: &str) -> String {
     match String::from_utf8(buf) {
         Ok(s) => s,
         Err(_) => "(binary file)".into(),
+    }
+}
+
+/// Show an image from `path`, decoded down to at most `max_px` on its longest
+/// side. `GtkImage::set_from_file` always decodes at full resolution
+/// (`set_pixel_size` scales only the *display*, not the backing texture), so a
+/// preview of a full-screen screenshot or photo costs ~9 MB of RGBA. Over a
+/// session of browsing image clips that grows RSS into the hundreds of MB and
+/// eventually starves the compositor/main loop, which drops input. Decoding to
+/// the preview size keeps each image at a few hundred KB.
+fn set_scaled_image(img: &Image, path: &str, max_px: i32) {
+    match gtk4::gdk_pixbuf::Pixbuf::from_file_at_scale(path, max_px, max_px, true) {
+        Ok(pb) => img.set_paintable(Some(&gtk4::gdk::Texture::for_pixbuf(&pb))),
+        Err(_) => img.clear(),
     }
 }
 
