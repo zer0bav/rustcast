@@ -1016,6 +1016,22 @@ impl Ui {
             self.window.is_visible(),
             self.entry.has_focus()
         ));
+
+        // Confirmed failure mode (hyprland): the overlay maps but the compositor
+        // leaves keyboard focus on whatever was focused before (e.g. Signal), so
+        // the launcher is visible yet swallows every key. Setting Exclusive +
+        // grab_focus before present isn't always honoured because the surface
+        // isn't mapped yet. Re-assert once more a beat after the map so hyprland
+        // re-evaluates focus onto the exclusive layer.
+        if self.layer {
+            let window = self.window.clone();
+            let entry = self.entry.clone();
+            glib::timeout_add_local_once(std::time::Duration::from_millis(20), move || {
+                window.set_keyboard_mode(KeyboardMode::Exclusive);
+                entry.grab_focus();
+                dlog("show: post-map keyboard re-assert");
+            });
+        }
     }
 
     fn hide(&self) {
