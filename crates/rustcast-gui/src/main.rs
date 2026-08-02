@@ -142,6 +142,17 @@ fn dlog(msg: &str) {
     }
 }
 
+/// `$XDG_RUNTIME_DIR/rustcast` (or `~/.cache/rustcast`) — holds the daemon
+/// pidfile so the recovery script can hard-kill a hung primary regardless of
+/// how it was launched (bare `rustcast` that became primary from a hotkey, or
+/// an explicit `--daemon`).
+fn daemon_runtime_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")))
+        .map(|d| d.join("rustcast"))
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
@@ -240,6 +251,21 @@ fn run_daemon() {
             }
         }
         0
+    });
+
+    // Record the resident PID once we're the primary (connect_startup fires only
+    // for the primary registration, never for a remote/forwarding invocation) so
+    // recovery can force-replace a hung daemon by PID. Cleared on shutdown.
+    app.connect_startup(|_| {
+        if let Some(dir) = daemon_runtime_dir() {
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::fs::write(dir.join("daemon.pid"), std::process::id().to_string());
+        }
+    });
+    app.connect_shutdown(|_| {
+        if let Some(dir) = daemon_runtime_dir() {
+            let _ = std::fs::remove_file(dir.join("daemon.pid"));
+        }
     });
 
     app.run();
