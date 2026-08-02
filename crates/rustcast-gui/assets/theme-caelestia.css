@@ -1,0 +1,237 @@
+/* rustcast — "caelestia" theme: soft lavender dashboard (v1.0)
+   Mirrors the caelestia Waybar/Hyprland dashboard: deep slate ground, soft
+   periwinkle + mauve accents, low contrast, gentle rounded cards.
+   Palette parity with ~/.config/hypr/scheme/current.conf and
+   ~/.config/waybar/style/caelestia-bottom.css
+     ground #0c0e12  box #171a1f  container-high #1d2026
+     text #e3e5ef  dim #a8abb5  faint #72757e
+     periwinkle #b4c7ed  mauve #d0bdf4  lilac #eaddff
+     mint(safe) #6ee7a8  coral(danger) #fa746f */
+
+@define-color bg          #0e1015;
+@define-color surface     #171a1f;
+@define-color surface2    #1d2026;
+@define-color text        #e3e5ef;
+@define-color muted       #a8abb5;
+@define-color faint       #72757e;
+@define-color accent      #b4c7ed;
+@define-color accent-soft rgba(180, 199, 237, 0.14);
+@define-color mauve       #d0bdf4;
+@define-color tertiary    #eaddff;
+@define-color mint        #6ee7a8;
+@define-color coral       #fa746f;
+@define-color border      rgba(180, 199, 237, 0.28);
+
+window { background: transparent; }
+
+/* soft card body — deep slate ground, faint periwinkle hairline, gentle shadow */
+.box-wrapper {
+  background: linear-gradient(160deg, rgba(23, 26, 31, 0.98), rgba(14, 16, 21, 0.98));
+  border: 1px solid @border;
+  border-radius: 14px;
+  padding: 8px 8px 6px 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05),
+              0 12px 34px rgba(0, 0, 0, 0.45);
+}
+
+/* ── tab bar ─────────────────────────────────────────── */
+.tab-bar {
+  padding: 2px 2px 8px 2px;
+}
+.tab {
+  background: transparent;
+  color: @faint;
+  border: none;
+  box-shadow: none;
+  border-radius: 10px;
+  padding: 4px 12px;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 12px;
+  min-height: 0;
+  transition: background 200ms ease, color 200ms ease, box-shadow 200ms ease;
+}
+.tab:hover {
+  background: rgba(180, 199, 237, 0.12);
+  color: @accent;
+}
+/* active tab = the dashboard active pill: filled periwinkle, dark ink */
+.tab-active {
+  background: rgba(180, 199, 237, 0.90);
+  color: #12141a;
+  font-weight: bold;
+  box-shadow: 0 0 8px rgba(180, 199, 237, 0.30);
+}
+.tab-active:hover {
+  background: rgba(180, 199, 237, 0.90);
+  color: #12141a;
+}
+
+/* ── search input ────────────────────────────────────── */
+.input {
+  background: rgba(180, 199, 237, 0.05);
+  color: @text;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 16px;
+  padding: 12px 14px;
+  border: 1px solid @border;
+  border-radius: 12px;
+  margin-bottom: 8px;
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+.input:focus,
+.input:focus-within {
+  outline: none;
+  border-color: @accent;
+  box-shadow: 0 0 0 3px @accent-soft, 0 0 8px rgba(180, 199, 237, 0.18);
+}
+.input > text { background: transparent; }
+.input > text > placeholder { color: @faint; }
+/* active command mode: mauve left rail */
+.input.mode-active {
+  border-color: @mauve;
+  border-left-width: 4px;
+  box-shadow: inset 0 0 0 1px rgba(208, 189, 244, 0.16),
+              0 0 8px rgba(208, 189, 244, 0.16);
+}
+
+/* ── result list ─────────────────────────────────────── */
+.list, .list-scroll { background: transparent; }
+
+row {
+  padding: 0;
+  border-radius: 11px;
+  margin: 1px 0;
+  transition: background 160ms ease, box-shadow 160ms ease;
+}
+.row-inner { padding: 6px 10px; }
+/* selected row = soft dashboard card: periwinkle wash + rail, gentle glow */
+row:selected {
+  background: linear-gradient(90deg, rgba(180, 199, 237, 0.14), rgba(208, 189, 244, 0.07));
+  box-shadow: inset 2px 0 0 @accent,
+              inset 0 1px 0 rgba(255, 255, 255, 0.05),
+              0 0 8px rgba(180, 199, 237, 0.12);
+}
+
+/* group captions ("Suggestions", "Applications", "Pinned"…) */
+row.section-header {
+  background: transparent;
+  box-shadow: none;
+  margin: 8px 0 1px 0;
+}
+row.section-header:first-child { margin-top: 1px; }
+row.section-header .row-inner { padding: 2px 10px; }
+.section-title {
+  color: @mauve;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 1.4px;
+  text-shadow: 0 0 6px rgba(208, 189, 244, 0.16);
+}
+
+.app-title {
+  color: @text;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 13px;
+}
+.app-sub {
+  color: @faint;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 11px;
+  padding-left: 4px;
+}
+.app-tag {
+  color: @faint;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 10px;
+  padding-left: 8px;
+  letter-spacing: 0.5px;
+}
+row:selected .app-title { color: #ffffff; }
+row:selected .app-sub   { color: @muted; }
+
+/* ── preview pane ────────────────────────────────────── */
+.preview {
+  background: linear-gradient(160deg, rgba(23, 26, 31, 0.92), rgba(14, 16, 21, 0.92));
+  border: 1px solid @border;
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.preview-text {
+  color: #d7dbe8;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 12px;
+}
+/* metadata table under the preview body */
+.preview-meta {
+  padding-top: 10px;
+  margin-top: 8px;
+  border-top: 1px solid @surface2;
+}
+.meta-key {
+  color: @faint;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 11px;
+}
+.meta-value {
+  color: @accent;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 11px;
+}
+
+/* ── footer action chips (animated) ──────────────────── */
+.footer {
+  padding: 8px 4px 2px 4px;
+  margin-top: 6px;
+  border-top: 1px solid @surface2;
+}
+.chip {
+  opacity: 0.9;
+}
+.chip-key {
+  color: #12141a;
+  background: rgba(180, 199, 237, 0.82);
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 11px;
+  font-weight: bold;
+}
+.chip-label {
+  color: @muted;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 11px;
+}
+
+/* slide-in: footer is re-populated on tab/selection change; restarts each time
+   the .slidein class is toggled */
+@keyframes footer-slide {
+  from { opacity: 0; margin-left: 18px; }
+  to   { opacity: 1; margin-left: 0; }
+}
+.footer.slidein {
+  animation: footer-slide 180ms ease-out;
+}
+
+/* ── actions menu popover ────────────────────────────── */
+.actions-menu {
+  background: linear-gradient(160deg, rgba(23, 26, 31, 0.98), rgba(14, 16, 21, 0.98));
+  border: 1px solid rgba(180, 199, 237, 0.26);
+  border-radius: 12px;
+  padding: 4px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+.action-row {
+  color: @text;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 13px;
+  padding: 7px 12px;
+  border-radius: 8px;
+}
+.action-row:selected {
+  background: rgba(180, 199, 237, 0.16);
+  color: #ffffff;
+}
+
+scrollbar { opacity: 0; }

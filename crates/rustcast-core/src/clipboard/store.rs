@@ -24,8 +24,20 @@ pub struct Store {
 }
 
 impl Store {
-    /// Open (creating if needed) the clipboard DB under the data dir.
+    /// Open (creating if needed) the clipboard DB under the data dir. Uses a
+    /// generous busy-timeout suited to the writer (ingest) path.
     pub fn open() -> anyhow::Result<Store> {
+        Self::open_with_timeout(std::time::Duration::from_millis(3000))
+    }
+
+    /// Open for GUI (main-thread) use with a short busy-timeout so a WAL
+    /// checkpoint or writer lock can never stall the UI for seconds. A read that
+    /// loses the race just returns what it can; the next 700 ms tick retries.
+    pub fn open_reader() -> anyhow::Result<Store> {
+        Self::open_with_timeout(std::time::Duration::from_millis(150))
+    }
+
+    fn open_with_timeout(busy: std::time::Duration) -> anyhow::Result<Store> {
         let dir = crate::config::Config::data_dir()
             .ok_or_else(|| anyhow::anyhow!("no data dir"))?;
         std::fs::create_dir_all(&dir)?;
@@ -33,7 +45,7 @@ impl Store {
         std::fs::create_dir_all(&blobs)?;
         let conn = Connection::open(dir.join("clipboard.db"))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.busy_timeout(std::time::Duration::from_millis(3000))?;
+        conn.busy_timeout(busy)?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS clips(
                 id INTEGER PRIMARY KEY,

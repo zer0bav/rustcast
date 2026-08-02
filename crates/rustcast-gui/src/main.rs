@@ -289,6 +289,20 @@ fn run_oneshot(inv: Invocation) {
     app.run_with_args::<String>(&[]);
 }
 
+/// True if `pid` is a live process whose command line is our own clipboard
+/// daemon (`--clip-daemon`). Guards against a recycled pid being mistaken for a
+/// running daemon after a reboot/crash left a stale lockfile behind.
+fn clip_daemon_alive(pid: i32) -> bool {
+    if pid <= 0 {
+        return false;
+    }
+    match std::fs::read(format!("/proc/{pid}/cmdline")) {
+        // cmdline is NUL-separated argv; a live rustcast daemon carries the flag.
+        Ok(raw) => raw.split(|&b| b == 0).any(|arg| arg == b"--clip-daemon"),
+        Err(_) => false,
+    }
+}
+
 /// Spawn the two `wl-paste --watch` processes that feed the clipboard store.
 /// Guarded by a lockfile so only one daemon runs.
 fn run_clip_daemon() {
@@ -296,10 +310,13 @@ fn run_clip_daemon() {
     let Some(dir) = Config::data_dir() else { return };
     let _ = std::fs::create_dir_all(&dir);
     let lock = dir.join("clip-daemon.lock");
-    // crude single-instance guard: bail if a live pid is recorded
+    // Single-instance guard: bail only if the recorded pid is *our* daemon still
+    // alive. Checking `/proc/<pid>` alone is not enough — after a reboot the OS
+    // can recycle that pid for an unrelated process, which would make us think
+    // the daemon is up and never spawn the watchers (clipboard silently dead).
     if let Ok(pid) = std::fs::read_to_string(&lock) {
         if let Ok(pid) = pid.trim().parse::<i32>() {
-            if std::path::Path::new(&format!("/proc/{pid}")).exists() {
+            if clip_daemon_alive(pid) {
                 return;
             }
         }
@@ -385,7 +402,9 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
 
     // Native clipboard store + background watcher daemon.
     let clip_store = if cfg.clipboard.enabled {
-        Store::open().ok().map(Rc::new)
+        // Short busy-timeout: this store is read on the GTK main thread, so it
+        // must never block the UI for seconds during a WAL checkpoint.
+        Store::open_reader().ok().map(Rc::new)
     } else {
         None
     };
@@ -919,12 +938,19 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
     // focus deterministic.
     {
         let entry = entry.clone();
+        let clip_enabled = cfg.clipboard.enabled;
         window.connect_map(move |w| {
             if layer {
                 w.set_keyboard_mode(KeyboardMode::Exclusive);
             }
             entry.grab_focus();
             dlog("map: reasserted keyboard mode + focus");
+            // Respawn the clipboard watcher if it has died (compositor restart,
+            // Wayland disconnect, crash). `ensure_clip_daemon` is guarded by the
+            // lockfile, so this is a cheap no-op while the daemon is alive.
+            if clip_enabled {
+                ensure_clip_daemon();
+            }
         });
     }
 
@@ -1631,7 +1657,18 @@ fn clip_image_temp(line: &str) -> Option<String> {
 /// Move the selection by `delta`, stepping over the non-selectable section
 /// headers so ↑/↓ only ever lands on a real result.
 fn move_sel(list: &ListBox, scroll: &ScrolledWindow, delta: i32) {
-    let cur = list.selected_row().map(|r| r.index()).unwrap_or(0);
+    // No selection yet (e.g. list just repopulated): the first ↑/↓ press should
+    // land on the first real row rather than being a dead key. Without this,
+    // Down (delta=+1) recovered via next=1 while Up (delta=-1) computed next=-1
+    // and returned — "the up arrow doesn't work, down does".
+    let Some(cur_row) = list.selected_row() else {
+        select_first(list);
+        if let Some(r) = list.selected_row() {
+            scroll_into_view(scroll, &r);
+        }
+        return;
+    };
+    let cur = cur_row.index();
     let step = if delta >= 0 { 1 } else { -1 };
     let mut next = cur + delta;
     let row = loop {
@@ -1645,6 +1682,10 @@ fn move_sel(list: &ListBox, scroll: &ScrolledWindow, delta: i32) {
         next += step;
     };
     list.select_row(Some(&row));
+    dlog(&format!(
+        "move_sel d={delta} cur={cur} -> next={next} now={:?}",
+        list.selected_row().map(|r| r.index())
+    ));
     scroll_into_view(scroll, &row);
 }
 
@@ -1678,6 +1719,8 @@ fn select_first(list: &ListBox) -> Option<usize> {
     None
 }
 
+const CAELESTIA_CSS: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/theme-caelestia.css"));
 const DEFAULT_CSS: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/style.css"));
 const TBSR_CSS: &str =
@@ -1685,8 +1728,10 @@ const TBSR_CSS: &str =
 const CYBERDECK_CSS: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/theme-cyberdeck.css"));
 
-/// Bundled themes, in the order Ctrl+T cycles through them.
+/// Bundled themes, in the order Ctrl+T cycles through them. `caelestia` (soft
+/// lavender dashboard) is the default (index 0).
 const BUNDLED_THEMES: &[(&str, &str)] = &[
+    ("caelestia", CAELESTIA_CSS),
     ("gruvbox", DEFAULT_CSS),
     ("tbsr", TBSR_CSS),
     ("cyberdeck", CYBERDECK_CSS),
@@ -1696,9 +1741,10 @@ const BUNDLED_THEMES: &[(&str, &str)] = &[
 /// gracefully. Returns `None` for empty/custom-path values (→ index 0).
 fn theme_index(name: &str) -> Option<usize> {
     match name.trim().to_ascii_lowercase().as_str() {
-        "default" | "gruvbox" => Some(0),
-        "tbsr" | "waybar" | "anime" => Some(1),
-        "cyberdeck" | "deck" => Some(2),
+        "caelestia" | "soft" | "dashboard" => Some(0),
+        "default" | "gruvbox" => Some(1),
+        "tbsr" | "waybar" | "anime" => Some(2),
+        "cyberdeck" | "deck" => Some(3),
         _ => None,
     }
 }
@@ -1714,7 +1760,7 @@ fn load_css(cfg: &Config) -> (CssProvider, usize) {
     let theme = cfg.ui.theme.trim();
     let idx = match theme_index(theme) {
         Some(i) => {
-            // gruvbox may still be overridden by the user's own style.css
+            // the default (index 0) may still be overridden by the user's own style.css
             if i == 0 {
                 match Config::user_css().filter(|p| p.exists()) {
                     Some(p) => provider.load_from_path(&p),
@@ -1732,7 +1778,7 @@ fn load_css(cfg: &Config) -> (CssProvider, usize) {
         None => {
             match Config::user_css().filter(|p| p.exists()) {
                 Some(p) => provider.load_from_path(&p),
-                None => provider.load_from_data(DEFAULT_CSS),
+                None => provider.load_from_data(BUNDLED_THEMES[0].1),
             }
             0
         }
