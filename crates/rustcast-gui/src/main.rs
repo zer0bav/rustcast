@@ -608,6 +608,31 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
                     set_scaled_image(&prev_img, p, 320);
                     set_meta_rows(&prev_meta, &[("".into(), it.subtitle.clone())]);
                 }
+                Prev::WindowShot { addr, geom, fallback_icon } => {
+                    // Lazy: capture only the window being previewed (this closure
+                    // runs for the top result + whatever the user arrows onto —
+                    // never the whole list). grim reads the visible framebuffer,
+                    // so an occluded/off-screen window yields an empty/failed
+                    // shot → fall back to the app icon.
+                    prev_lbl.set_text("");
+                    let shot = format!("/tmp/rustcast-win-{}.png", addr.trim_start_matches("0x"));
+                    let captured = geom.as_ref().map(|g| grim_capture(g, &shot)).unwrap_or(false);
+                    if captured {
+                        prev_img.set_pixel_size(320);
+                        set_scaled_image(&prev_img, &shot, 320);
+                        set_meta_rows(&prev_meta, &[("".into(), it.subtitle.clone())]);
+                    } else {
+                        prev_img.set_pixel_size(120);
+                        prev_img.set_icon_name(Some(fallback_icon));
+                        set_meta_rows(
+                            &prev_meta,
+                            &[
+                                ("".into(), it.subtitle.clone()),
+                                ("preview".into(), "unavailable — window not visible".into()),
+                            ],
+                        );
+                    }
+                }
                 Prev::Rich { image, text, meta } => {
                     // Body (image or text) on top, metadata table at the bottom.
                     match image {
@@ -725,7 +750,7 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
     // Preview pane is only meaningful on content tabs; hide it elsewhere for a
     // minimal single-column (rofi-style) look. Clipboard always keeps it.
     fn tab_shows_preview(tab: Tab) -> bool {
-        matches!(tab, Tab::Clipboard | Tab::Files | Tab::Cheat)
+        matches!(tab, Tab::Clipboard | Tab::Files | Tab::Cheat | Tab::Win)
     }
 
     let switch_tab = {
@@ -910,7 +935,7 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
                     entry.set_text("");
                     Propagation::Stop
                 }
-                // cycle bundled themes live: gruvbox → tbsr → cyberdeck → …
+                // cycle bundled themes live: caelestia → cyberdeck → tokyonight → catppuccin → …
                 Key::t | Key::T if ctrl => {
                     let next = (theme_idx.get() + 1) % BUNDLED_THEMES.len();
                     theme_idx.set(next);
@@ -940,11 +965,9 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
         let entry = entry.clone();
         let clip_enabled = cfg.clipboard.enabled;
         window.connect_map(move |w| {
-            if layer {
-                w.set_keyboard_mode(KeyboardMode::Exclusive);
-            }
-            entry.grab_focus();
-            dlog("map: reasserted keyboard mode + focus");
+            // Same scheduled re-assert as show_with, so an external
+            // set_visible(true) path is covered too.
+            reassert_focus(w, &entry, layer);
             // Respawn the clipboard watcher if it has died (compositor restart,
             // Wayland disconnect, crash). `ensure_clip_daemon` is guarded by the
             // lockfile, so this is a cheap no-op while the daemon is alive.
@@ -1020,6 +1043,48 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
     })
 }
 
+/// Re-assert layer-shell keyboard focus on a short fixed schedule after the
+/// surface maps. This is the root fix for the "launcher visible but swallows
+/// keys" freeze: on hyprland the compositor sometimes finishes moving keyboard
+/// focus onto the newly-mapped exclusive layer *after* our pre-present
+/// `grab_focus`, and the old single 20 ms shot fired once — so if the compositor
+/// was still mid-transition (more likely after hours of uptime / many surfaces)
+/// focus was never recaptured until the next show.
+///
+/// We deliberately do NOT verify `entry.has_focus()` and loop: GTK exposes no
+/// signal for whether the compositor is delivering keys to a layer surface
+/// (and for a composite `Entry` `has_focus()` is false anyway — focus lives on
+/// the inner GtkText delegate). Instead we re-request the exclusive grab + entry
+/// focus a few times over ~400 ms (covering a late focus transition), and finish
+/// with a `KeyboardMode::None -> Exclusive` toggle that forces the compositor to
+/// drop and re-grant the grab if it got stuck — the strongest lever, applied
+/// once, without a visible flicker.
+fn reassert_focus(window: &ApplicationWindow, entry: &Entry, layer: bool) {
+    if layer {
+        window.set_keyboard_mode(KeyboardMode::Exclusive);
+    }
+    entry.grab_focus();
+    dlog("reassert: immediate grab");
+    // A few timed re-asserts; the last also toggles the grab to force re-eval.
+    const SCHEDULE_MS: [u64; 3] = [80, 200, 400];
+    for (i, &delay) in SCHEDULE_MS.iter().enumerate() {
+        let (w, e) = (window.clone(), entry.clone());
+        let last = i == SCHEDULE_MS.len() - 1;
+        glib::timeout_add_local_once(std::time::Duration::from_millis(delay), move || {
+            if layer {
+                w.set_keyboard_mode(KeyboardMode::Exclusive);
+            }
+            e.grab_focus();
+            if last && layer {
+                w.set_keyboard_mode(KeyboardMode::None);
+                w.set_keyboard_mode(KeyboardMode::Exclusive);
+                e.grab_focus();
+                dlog("reassert: toggled None->Exclusive to force re-eval");
+            }
+        });
+    }
+}
+
 impl Ui {
     /// Present the window fresh: reload config if it changed, reset mode/target,
     /// switch to the requested (or default) tab, pre-fill the query, refresh the
@@ -1073,17 +1138,10 @@ impl Ui {
         // leaves keyboard focus on whatever was focused before (e.g. Signal), so
         // the launcher is visible yet swallows every key. Setting Exclusive +
         // grab_focus before present isn't always honoured because the surface
-        // isn't mapped yet. Re-assert once more a beat after the map so hyprland
-        // re-evaluates focus onto the exclusive layer.
-        if self.layer {
-            let window = self.window.clone();
-            let entry = self.entry.clone();
-            glib::timeout_add_local_once(std::time::Duration::from_millis(20), move || {
-                window.set_keyboard_mode(KeyboardMode::Exclusive);
-                entry.grab_focus();
-                dlog("show: post-map keyboard re-assert");
-            });
-        }
+        // isn't mapped yet. Re-assert (and re-check) after the map until the
+        // re-request the exclusive grab + entry focus on a short schedule — see
+        // `reassert_focus`.
+        reassert_focus(&self.window, &self.entry, self.layer);
     }
 
     fn hide(&self) {
@@ -1341,6 +1399,17 @@ fn open_actions_menu(
     }
     popover.set_child(Some(&menu));
     popover.set_parent(entry);
+    // A Popover parented via set_parent is NOT auto-removed on popdown — without
+    // this every Ctrl+K leaves a detached widget on the entry (the focus target),
+    // a slow multi-day leak that can itself degrade keyboard focus. Unparent on
+    // close and hand focus back to the entry so keys aren't swallowed afterwards.
+    {
+        let entry_p = entry.clone();
+        popover.connect_closed(move |p| {
+            p.unparent();
+            entry_p.grab_focus();
+        });
+    }
 
     let state2 = state.clone();
     let win2 = win.clone();
@@ -1636,6 +1705,20 @@ fn set_scaled_image(img: &Image, path: &str, max_px: i32) {
     }
 }
 
+/// Capture a screen region with `grim` for a window preview. `geom` is grim's
+/// "X,Y WxH" region; returns true only when grim succeeded AND wrote a non-empty
+/// file (grim silently produces nothing for an off-screen/occluded region).
+fn grim_capture(geom: &str, out: &str) -> bool {
+    let ok = std::process::Command::new("grim")
+        .arg("-g")
+        .arg(geom)
+        .arg(out)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    ok && std::fs::metadata(out).map(|m| m.len() > 0).unwrap_or(false)
+}
+
 /// Legacy clipboard image decode (for `Prev::ClipImage`).
 fn clip_image_temp(line: &str) -> Option<String> {
     use std::process::Command;
@@ -1721,20 +1804,21 @@ fn select_first(list: &ListBox) -> Option<usize> {
 
 const CAELESTIA_CSS: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/theme-caelestia.css"));
-const DEFAULT_CSS: &str =
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/style.css"));
-const TBSR_CSS: &str =
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/theme-tbsr.css"));
 const CYBERDECK_CSS: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/theme-cyberdeck.css"));
+const TOKYONIGHT_CSS: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/theme-tokyonight.css"));
+const CATPPUCCIN_CSS: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/theme-catppuccin.css"));
 
 /// Bundled themes, in the order Ctrl+T cycles through them. `caelestia` (soft
-/// lavender dashboard) is the default (index 0).
+/// lavender dashboard) is the default (index 0); `cyberdeck` (sharp cyan) is
+/// index 1; `tokyonight` and `catppuccin` are the square-cornered dark themes.
 const BUNDLED_THEMES: &[(&str, &str)] = &[
     ("caelestia", CAELESTIA_CSS),
-    ("gruvbox", DEFAULT_CSS),
-    ("tbsr", TBSR_CSS),
     ("cyberdeck", CYBERDECK_CSS),
+    ("tokyonight", TOKYONIGHT_CSS),
+    ("catppuccin", CATPPUCCIN_CSS),
 ];
 
 /// Resolve a `[ui].theme` value to a bundled theme index, treating aliases
@@ -1742,17 +1826,18 @@ const BUNDLED_THEMES: &[(&str, &str)] = &[
 fn theme_index(name: &str) -> Option<usize> {
     match name.trim().to_ascii_lowercase().as_str() {
         "caelestia" | "soft" | "dashboard" => Some(0),
-        "default" | "gruvbox" => Some(1),
-        "tbsr" | "waybar" | "anime" => Some(2),
-        "cyberdeck" | "deck" => Some(3),
+        "cyberdeck" | "deck" => Some(1),
+        "tokyonight" | "tokyo" | "night" => Some(2),
+        "catppuccin" | "mocha" | "catppuccin-mocha" => Some(3),
         _ => None,
     }
 }
 
 /// Load the stylesheet into a fresh persistent provider and return it together
 /// with the active bundled-theme index (for Ctrl+T cycling). `[ui].theme`
-/// accepts a bundled theme *name* (gruvbox | tbsr | cyberdeck, plus aliases) or
-/// a path to a custom `.css`; empty falls back to `~/.config/rustcast/style.css`
+/// accepts a bundled theme *name* (caelestia | cyberdeck | tokyonight |
+/// catppuccin, plus aliases) or a path to a custom `.css`; empty falls back to
+/// `~/.config/rustcast/style.css`
 /// then the bundled default. All bundled themes are embedded at compile time so
 /// the binary is self-contained (a packaged install has no source tree to read).
 fn load_css(cfg: &Config) -> (CssProvider, usize) {

@@ -61,7 +61,8 @@ keyboard-driven.
   are present or missing, with install hints
 - ⌨️ **Mode tabs** (Apps · Clipboard · Files · Cheats · Windows · Extensions)
   and a Cmd-K style actions menu
-- 🎨 Gruvbox-dark theme, single-line rows, English UI, GTK4
+- 🎨 Four bundled dark themes (caelestia · cyberdeck · tokyonight · catppuccin),
+  single-line rows, English UI, GTK4
 
 ### More screenshots
 
@@ -169,7 +170,7 @@ your compositor, bind `rustcast --no-daemon` for the classic one-shot mode.
 - Type to search; `↑`/`↓` (or `Ctrl+J/K`) to move; `Enter` to run.
 - `Tab` / `Shift+Tab` cycle tabs; `Ctrl+1..6` jump to one.
 - `Ctrl+K` opens the actions menu (copy, delete, pin, reveal, force-kill, …).
-- `Ctrl+T` cycles the bundled themes live (gruvbox → tbsr → cyberdeck).
+- `Ctrl+T` cycles the bundled themes live (caelestia → cyberdeck → tokyonight → catppuccin).
 - `Esc` clears the query, then closes.
 
 **Clipboard tab** — `Enter` copies the entry back, `Ctrl+D` deletes it,

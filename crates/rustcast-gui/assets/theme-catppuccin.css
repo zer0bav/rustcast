@@ -1,62 +1,60 @@
-/* rustcast — "cyberdeck" theme (v1.0)
-   Mirrors the cyberdeck Waybar look: square segments (radius 2), 2px blue
-   frame #61afef, dark #282c34 ground, soft cyan #9cdef2, teal #56b6c2, peach
-   active accent #fab387. Palette parity with
-   ~/.config/waybar/style/cyberdeck.css */
+/* rustcast — "catppuccin" theme (v1.0, Mocha)
+   Catppuccin Mocha palette, square corners. Warm dark base, mauve accent
+   #cba6f7 with a blue secondary, hairline surface borders, 2px accent left-rail
+   on the selected row. Soft, cozy, modern. */
 
-@define-color bg          #282c34;
-@define-color surface     #292d35;
-@define-color surface2    #2e3440;
-@define-color text        #9cdef2;
-@define-color muted       #7fb8cc;
-@define-color faint       #565f73;
-@define-color frame       #61afef;   /* blue segment border */
-@define-color teal        #56b6c2;
-@define-color peach       #fab387;
-@define-color red         #e06c75;
+@define-color bg          #1e1e2e;   /* base */
+@define-color surface     #282839;   /* surface0-ish, inputs/tabs */
+@define-color surface2    #313244;   /* selected row fill */
+@define-color border      #45475a;   /* surface1 hairline */
+@define-color text        #cdd6f4;
+@define-color muted       #a6adc8;
+@define-color faint       #6c7086;
+@define-color accent      #cba6f7;   /* mauve */
+@define-color accent2     #89b4fa;   /* blue secondary */
+@define-color green       #a6e3a1;
+@define-color red         #f38ba8;
 
 window { background: transparent; }
 
-/* bar body: solid dark, 2px teal frame, square corners */
+/* card body: warm dark base, 1px hairline frame, square corners */
 .box-wrapper {
   background: @bg;
-  border: 2px solid @teal;
-  border-radius: 2px;
+  border: 1px solid @border;
+  border-radius: 0;
   padding: 8px 8px 6px 8px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
 }
 
 /* ── tab bar ─────────────────────────────────────────── */
 .tab-bar {
   padding: 2px 2px 8px 2px;
 }
-/* each tab = a bracketed cyberdeck segment: square, 2px blue frame */
 .tab {
   background: @surface;
-  color: @text;
-  border: 2px solid @frame;
+  color: @muted;
+  border: 1px solid @border;
   box-shadow: none;
-  border-radius: 2px;
-  padding: 3px 11px;
+  border-radius: 0;
+  padding: 3px 12px;
   font-family: "JetBrainsMono Nerd Font", monospace;
   font-size: 12px;
   font-weight: bold;
   min-height: 0;
-  transition: background 200ms ease, color 200ms ease;
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
 }
 .tab:hover {
   background: @surface2;
-  color: #cdeefb;
+  color: @text;
 }
-/* active tab = the active-workspace pill: peach ink on teal fill */
 .tab-active {
-  background: @teal;
-  color: @peach;
-  border-color: @teal;
+  background: @accent;
+  color: @bg;
+  border-color: @accent;
 }
 .tab-active:hover {
-  background: @teal;
-  color: @peach;
+  background: @accent;
+  color: @bg;
 }
 
 /* ── search input ────────────────────────────────────── */
@@ -66,23 +64,22 @@ window { background: transparent; }
   font-family: "JetBrainsMono Nerd Font", monospace;
   font-size: 16px;
   padding: 11px 14px;
-  border: 2px solid @frame;
-  border-radius: 2px;
+  border: 1px solid @border;
+  border-radius: 0;
   margin-bottom: 8px;
   transition: border-color 180ms ease, box-shadow 180ms ease;
 }
 .input:focus,
 .input:focus-within {
   outline: none;
-  border-color: @teal;
-  box-shadow: 0 0 0 2px rgba(86, 182, 194, 0.35);
+  border-color: @accent;
+  box-shadow: inset 0 0 0 1px rgba(203, 166, 247, 0.35);
 }
 .input > text { background: transparent; }
 .input > text > placeholder { color: @faint; }
-/* active command mode: red left frame — the "hot" segment accent */
 .input.mode-active {
   border-color: @red;
-  border-left-width: 4px;
+  border-left-width: 3px;
 }
 
 /* ── result list ─────────────────────────────────────── */
@@ -90,16 +87,15 @@ window { background: transparent; }
 
 row {
   padding: 0;
-  border-radius: 2px;
+  border-radius: 0;
   margin: 1px 2px;
-  transition: background 120ms ease, box-shadow 120ms ease;
+  transition: background 120ms ease;
 }
 .row-inner { padding: 7px 12px; }
-/* selected row = a lit cyberdeck segment: dark fill + teal frame + peach rail */
+/* selected row = subtle fill + 2px mauve left rail */
 row:selected {
   background: @surface2;
-  box-shadow: inset 0 0 0 2px @teal,
-              inset 4px 0 0 @peach;
+  box-shadow: inset 3px 0 0 @accent;
 }
 
 /* group captions ("Suggestions", "Applications", "Pinned"…) */
@@ -109,13 +105,13 @@ row.section-header {
   margin: 8px 0 1px 0;
 }
 row.section-header:first-child { margin-top: 1px; }
-row.section-header .row-inner { padding: 2px 10px; }
+row.section-header .row-inner { padding: 2px 12px; }
 .section-title {
-  color: @teal;
+  color: @accent2;
   font-family: "JetBrainsMono Nerd Font", monospace;
   font-size: 10px;
   font-weight: bold;
-  letter-spacing: 1.4px;
+  letter-spacing: 1.5px;
 }
 
 .app-title {
@@ -136,14 +132,14 @@ row.section-header .row-inner { padding: 2px 10px; }
   padding-left: 8px;
   letter-spacing: 0.5px;
 }
-row:selected .app-title { color: @peach; }
+row:selected .app-title { color: #e4d7fb; }
 row:selected .app-sub   { color: @muted; }
 
 /* ── preview pane ────────────────────────────────────── */
 .preview {
   background: @surface;
-  border: 2px solid @frame;
-  border-radius: 2px;
+  border: 1px solid @border;
+  border-radius: 0;
   padding: 14px 16px;
 }
 .preview-text {
@@ -151,11 +147,10 @@ row:selected .app-sub   { color: @muted; }
   font-family: "JetBrainsMono Nerd Font", monospace;
   font-size: 12px;
 }
-/* metadata table under the preview body */
 .preview-meta {
   padding-top: 10px;
   margin-top: 8px;
-  border-top: 2px solid @frame;
+  border-top: 1px solid @border;
 }
 .meta-key {
   color: @faint;
@@ -163,7 +158,7 @@ row:selected .app-sub   { color: @muted; }
   font-size: 11px;
 }
 .meta-value {
-  color: @teal;
+  color: @accent;
   font-family: "JetBrainsMono Nerd Font", monospace;
   font-size: 11px;
 }
@@ -172,15 +167,15 @@ row:selected .app-sub   { color: @muted; }
 .footer {
   padding: 8px 4px 2px 4px;
   margin-top: 6px;
-  border-top: 2px solid @frame;
+  border-top: 1px solid @border;
 }
 .chip {
   opacity: 0.95;
 }
 .chip-key {
   color: @bg;
-  background: @teal;
-  border-radius: 2px;
+  background: @accent;
+  border-radius: 0;
   padding: 1px 6px;
   font-family: "JetBrainsMono Nerd Font", monospace;
   font-size: 11px;
@@ -203,9 +198,9 @@ row:selected .app-sub   { color: @muted; }
 
 /* ── actions menu popover ────────────────────────────── */
 .actions-menu {
-  background: @bg;
-  border: 2px solid @frame;
-  border-radius: 2px;
+  background: @surface;
+  border: 1px solid @border;
+  border-radius: 0;
   padding: 4px;
 }
 .action-row {
@@ -213,10 +208,10 @@ row:selected .app-sub   { color: @muted; }
   font-family: "JetBrainsMono Nerd Font", monospace;
   font-size: 13px;
   padding: 7px 12px;
-  border-radius: 2px;
+  border-radius: 0;
 }
 .action-row:selected {
-  background: @teal;
+  background: @accent;
   color: @bg;
 }
 
