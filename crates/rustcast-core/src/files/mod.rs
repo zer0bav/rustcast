@@ -34,18 +34,20 @@ pub struct FilesProvider {
     index: Arc<RwLock<Vec<FileEntry>>>,
     roots: Vec<String>,
     ignores: Vec<String>,
+    hidden: bool,
     walking: Arc<AtomicBool>,
     last_walk: Mutex<Option<Instant>>,
 }
 
 impl FilesProvider {
     /// Build the provider, loading any cached index immediately and kicking off
-    /// a fresh background walk.
-    pub fn new(roots: Vec<String>, ignores: Vec<String>) -> Self {
+    /// a fresh background walk. `hidden` includes dotfiles when true.
+    pub fn new(roots: Vec<String>, ignores: Vec<String>, hidden: bool) -> Self {
         let p = FilesProvider {
             index: Arc::new(RwLock::new(load_cache())),
             roots,
             ignores,
+            hidden,
             walking: Arc::new(AtomicBool::new(false)),
             last_walk: Mutex::new(None),
         };
@@ -64,9 +66,10 @@ impl FilesProvider {
         let idx = self.index.clone();
         let roots = self.roots.clone();
         let ignores = self.ignores.clone();
+        let hidden = self.hidden;
         let flag = self.walking.clone();
         std::thread::spawn(move || {
-            let entries = walk(&roots, &ignores);
+            let entries = walk(&roots, &ignores, hidden);
             save_cache(&entries);
             if let Ok(mut w) = idx.write() {
                 *w = entries;
@@ -104,10 +107,17 @@ impl Provider for FilesProvider {
     }
     fn query(&self, ctx: &QueryCtx) -> Vec<Item> {
         let q = ctx.query.trim();
+        let walking = self.walking.load(Ordering::SeqCst);
+        let count = self.index.read().map(|i| i.len()).unwrap_or(0);
         if q.is_empty() {
+            let sub = if walking {
+                format!("indexing… {count} files so far · gitignore-aware")
+            } else {
+                format!("{count} files indexed · gitignore-aware")
+            };
             return vec![Item::new(
                 "Type to search your files",
-                "indexed in the background · gitignore-aware",
+                sub,
                 "system-file-manager",
                 "files",
                 1,
@@ -116,14 +126,14 @@ impl Provider for FilesProvider {
         }
         let Ok(index) = self.index.read() else { return Vec::new() };
         if index.is_empty() {
-            return vec![Item::new(
-                "Indexing files…",
-                "first run builds the index — try again in a moment",
-                "content-loading",
-                "files",
-                1,
-                Action::None,
-            )];
+            // Distinguish "still building" from "genuinely empty" so the tab is
+            // never a silent blank the user reads as broken.
+            let (title, sub): (&str, &str) = if walking {
+                ("Indexing files…", "first run builds the index — try again in a moment")
+            } else {
+                ("No files indexed", "check your [files] roots in the config")
+            };
+            return vec![Item::new(title, sub, "content-loading", "files", 1, Action::None)];
         }
         let ql = q.to_lowercase();
         let scored = search(&index, ctx.matcher, &ql);
@@ -161,32 +171,49 @@ impl Provider for FilesProvider {
 }
 
 /// Score an index against a lowercased query. A cheap subsequence prefilter
-/// skips the expensive fuzzy scorer for most entries, and a hard evaluation
-/// budget bounds worst-case cost (e.g. a one-char query matching everything),
-/// so typing stays responsive even over a very large index.
+/// skips the expensive fuzzy scorer for most entries. Two hard caps bound the
+/// worst case so typing stays responsive even over a very large index:
+/// `SCAN_CAP` limits total entries visited (so a query matching almost nothing
+/// can't linearly scan a 500k-entry index every keystroke — the old freeze),
+/// and `MATCH_CAP` limits how many candidates we fuzzy-score. Relevance no
+/// longer depends on index order: an exact-prefix hit on the file name and
+/// shallower paths are boosted, and the best `RESULTS` are kept.
 fn search<'a>(
     index: &'a [FileEntry],
     matcher: &fuzzy_matcher::skim::SkimMatcherV2,
     ql: &str,
 ) -> Vec<(i64, &'a FileEntry)> {
-    const FUZZY_BUDGET: usize = 4000;
-    let mut budget = FUZZY_BUDGET;
+    const SCAN_CAP: usize = 60_000; // total entries visited (prefilter included)
+    const MATCH_CAP: usize = 8000; // candidates handed to the fuzzy scorer
+    const RESULTS: usize = 60;
+    let mut scanned = 0usize;
+    let mut matched = 0usize;
     let mut scored: Vec<(i64, &FileEntry)> = Vec::new();
     for e in index.iter() {
+        scanned += 1;
+        if scanned > SCAN_CAP {
+            break;
+        }
         if !is_subsequence(&e.name_lc, ql) {
             continue;
         }
         if let Some(mut s) = matcher.fuzzy_match(&e.name_lc, ql) {
             s -= e.depth as i64 * 2; // prefer shallower paths
+            if e.name_lc.starts_with(ql) {
+                s += 40; // strong boost for a real prefix match on the name
+            }
+            if e.name_lc == ql {
+                s += 60; // exact file-name match wins
+            }
             scored.push((s, e));
         }
-        budget -= 1;
-        if budget == 0 {
+        matched += 1;
+        if matched >= MATCH_CAP {
             break;
         }
     }
     scored.sort_by(|a, b| b.0.cmp(&a.0));
-    scored.truncate(60);
+    scored.truncate(RESULTS);
     scored
 }
 
@@ -210,14 +237,15 @@ fn is_subsequence(hay: &str, needle: &str) -> bool {
     cur.is_none()
 }
 
-fn walk(roots: &[String], ignores: &[String]) -> Vec<FileEntry> {
+fn walk(roots: &[String], ignores: &[String], hidden: bool) -> Vec<FileEntry> {
     let mut out = Vec::new();
     for root in roots {
         let base = expand_tilde(root);
         let mut builder = ignore::WalkBuilder::new(&base);
-        // hidden(true) skips dotfiles/dotdirs (.cache, .local, .git, .mozilla…),
-        // which is both what users expect from a file finder and a huge speedup.
-        builder.hidden(true).git_ignore(true).follow_links(false);
+        // WalkBuilder::hidden(true) means *skip* hidden entries (.cache, .local,
+        // .git, .mozilla…) — the default a file finder wants, and a huge speedup.
+        // The `[files] hidden = true` config flips this to include dotfiles.
+        builder.hidden(!hidden).git_ignore(true).follow_links(false);
         let ignores = ignores.to_vec();
         builder.filter_entry(move |e| {
             let name = e.file_name().to_string_lossy();
@@ -257,7 +285,10 @@ fn cache_path() -> Option<std::path::PathBuf> {
 fn load_cache() -> Vec<FileEntry> {
     let Some(p) = cache_path() else { return Vec::new() };
     let Ok(text) = std::fs::read_to_string(p) else { return Vec::new() };
+    // Cap at the same limit the walk uses, so a stale/bloated cache from an
+    // older build can't load a multi-hundred-k index that would slow queries.
     text.lines()
+        .take(200_000)
         .filter_map(|line| {
             let mut it = line.split('\t');
             let path = it.next()?.to_string();
@@ -311,6 +342,31 @@ mod tests {
         assert!(r.len() <= 60);
         // budget-bounded — must stay well under a frame even on 200k entries
         assert!(elapsed.as_millis() < 200, "query took {elapsed:?}");
+    }
+
+    #[test]
+    fn search_is_fast_on_no_match_query() {
+        // A query that matches almost nothing used to linearly scan the whole
+        // index (the budget only decremented on matches) — the freeze. With the
+        // total SCAN_CAP it must stay bounded.
+        let idx = fake_index(200_000);
+        let m = crate::ranking::matcher();
+        let start = std::time::Instant::now();
+        let r = search(&idx, &m, "zzzq");
+        let elapsed = start.elapsed();
+        assert!(r.is_empty());
+        assert!(elapsed.as_millis() < 50, "no-match query took {elapsed:?}");
+    }
+
+    #[test]
+    fn search_prefers_prefix_match() {
+        let idx = vec![
+            FileEntry { path: "/a/xmainx.txt".into(), name_lc: "xmainx.txt".into(), is_dir: false, size: 0, depth: 2 },
+            FileEntry { path: "/a/main.txt".into(), name_lc: "main.txt".into(), is_dir: false, size: 0, depth: 2 },
+        ];
+        let m = crate::ranking::matcher();
+        let r = search(&idx, &m, "main");
+        assert_eq!(r[0].1.name_lc, "main.txt", "prefix match should rank first");
     }
 }
 

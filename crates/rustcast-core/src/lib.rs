@@ -65,6 +65,7 @@ pub fn default_registry(
         reg.register(Box::new(files::FilesProvider::new(
             cfg.files.roots.clone(),
             cfg.files.ignore.clone(),
+            cfg.files.hidden,
         )));
     }
     reg.register(Box::new(procs::ProcessProvider::new()));

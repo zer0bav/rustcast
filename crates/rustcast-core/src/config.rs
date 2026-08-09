@@ -70,6 +70,10 @@ pub struct FilesConfig {
     pub enabled: bool,
     pub roots: Vec<String>,
     pub ignore: Vec<String>,
+    /// Include dotfiles/dot-directories in the index. Off by default (a file
+    /// finder normally hides `.cache`, `.local`, `.git`, …); turn on if you
+    /// want to search hidden files too.
+    pub hidden: bool,
 }
 
 impl Default for FilesConfig {
@@ -84,6 +88,7 @@ impl Default for FilesConfig {
                 ".cargo".into(),
                 "target".into(),
             ],
+            hidden: false,
         }
     }
 }
