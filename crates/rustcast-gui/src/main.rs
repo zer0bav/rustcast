@@ -608,30 +608,16 @@ fn build_ui(app: &Application, resident: bool) -> Rc<Ui> {
                     set_scaled_image(&prev_img, p, 320);
                     set_meta_rows(&prev_meta, &[("".into(), it.subtitle.clone())]);
                 }
-                Prev::WindowShot { addr, geom, fallback_icon } => {
-                    // Lazy: capture only the window being previewed (this closure
-                    // runs for the top result + whatever the user arrows onto —
-                    // never the whole list). grim reads the visible framebuffer,
-                    // so an occluded/off-screen window yields an empty/failed
-                    // shot → fall back to the app icon.
+                Prev::WindowIcon(icon) => {
+                    // Just the app's logo, shown large, plus the title/workspace.
                     prev_lbl.set_text("");
-                    let shot = format!("/tmp/rustcast-win-{}.png", addr.trim_start_matches("0x"));
-                    let captured = geom.as_ref().map(|g| grim_capture(g, &shot)).unwrap_or(false);
-                    if captured {
-                        prev_img.set_pixel_size(320);
-                        set_scaled_image(&prev_img, &shot, 320);
-                        set_meta_rows(&prev_meta, &[("".into(), it.subtitle.clone())]);
+                    prev_img.set_pixel_size(128);
+                    if icon.starts_with('/') {
+                        set_scaled_image(&prev_img, icon, 128);
                     } else {
-                        prev_img.set_pixel_size(120);
-                        prev_img.set_icon_name(Some(fallback_icon));
-                        set_meta_rows(
-                            &prev_meta,
-                            &[
-                                ("".into(), it.subtitle.clone()),
-                                ("preview".into(), "unavailable — window not visible".into()),
-                            ],
-                        );
+                        prev_img.set_icon_name(Some(icon));
                     }
+                    set_meta_rows(&prev_meta, &[("".into(), it.subtitle.clone())]);
                 }
                 Prev::Rich { image, text, meta } => {
                     // Body (image or text) on top, metadata table at the bottom.
@@ -1703,20 +1689,6 @@ fn set_scaled_image(img: &Image, path: &str, max_px: i32) {
         Ok(pb) => img.set_paintable(Some(&gtk4::gdk::Texture::for_pixbuf(&pb))),
         Err(_) => img.clear(),
     }
-}
-
-/// Capture a screen region with `grim` for a window preview. `geom` is grim's
-/// "X,Y WxH" region; returns true only when grim succeeded AND wrote a non-empty
-/// file (grim silently produces nothing for an off-screen/occluded region).
-fn grim_capture(geom: &str, out: &str) -> bool {
-    let ok = std::process::Command::new("grim")
-        .arg("-g")
-        .arg(geom)
-        .arg(out)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    ok && std::fs::metadata(out).map(|m| m.len() > 0).unwrap_or(false)
 }
 
 /// Legacy clipboard image decode (for `Prev::ClipImage`).

@@ -42,9 +42,6 @@ struct Win {
     title: String,
     app: String,
     workspace: String,
-    /// grim capture region "X,Y WxH" when the backend exposes geometry
-    /// (Hyprland only for now); None elsewhere → the GUI shows an icon instead.
-    geom: Option<String>,
 }
 
 pub struct WindowsProvider {
@@ -162,22 +159,32 @@ impl Provider for WindowsProvider {
                 } else {
                     format!("{} · workspace {}", w.app, w.workspace)
                 };
-                // Freedesktop icon name from the app class (lowercased), used as
-                // the preview fallback when grim can't capture the window.
-                let fallback_icon =
-                    if w.app.is_empty() { "window".to_string() } else { w.app.to_lowercase() };
-                Item::new(title, subtitle, "window", "win", score, Action::RunShell(self.focus_cmd(&w)))
-                    .with_prev(Prev::WindowShot {
-                        addr: w.handle.clone(),
-                        geom: w.geom.clone(),
-                        fallback_icon,
-                    })
+                // Use the app's own icon (freedesktop name from the window class)
+                // for both the row and the large preview — no screenshot.
+                let icon = app_icon(&w.app);
+                Item::new(title, subtitle, icon.clone(), "win", score, Action::RunShell(self.focus_cmd(&w)))
+                    .with_prev(Prev::WindowIcon(icon))
                     .with_actions(vec![SecondaryAction {
                         label: "Close window".into(),
                         action: Action::RunShell(self.close_cmd(&w)),
                     }])
             })
             .collect()
+    }
+}
+
+/// Best-effort freedesktop icon name for a window class. Reverse-DNS classes
+/// (e.g. "org.signal.Signal") usually ship an icon under that exact name; for
+/// plain classes the lowercased form matches ("brave-browser", "kitty", "mpv").
+/// Falls back to a generic window icon.
+fn app_icon(app: &str) -> String {
+    let a = app.trim();
+    if a.is_empty() {
+        "window".to_string()
+    } else if a.contains('.') {
+        a.to_string()
+    } else {
+        a.to_lowercase()
     }
 }
 
@@ -245,16 +252,7 @@ fn hyprland_windows() -> Vec<Win> {
             if app.is_empty() && title.is_empty() {
                 return None;
             }
-            // Geometry for grim: at:[x,y] + size:[w,h]. Absent/zero → no capture.
-            let at = c.get("at").and_then(|a| a.as_array());
-            let size = c.get("size").and_then(|a| a.as_array());
-            let coord = |a: Option<&Vec<serde_json::Value>>, i: usize| {
-                a.and_then(|a| a.get(i)).and_then(|v| v.as_i64()).unwrap_or(0)
-            };
-            let (x, y) = (coord(at, 0), coord(at, 1));
-            let (gw, gh) = (coord(size, 0), coord(size, 1));
-            let geom = if gw > 0 && gh > 0 { Some(format!("{x},{y} {gw}x{gh}")) } else { None };
-            Some(Win { handle, title, app, workspace, geom })
+            Some(Win { handle, title, app, workspace })
         })
         .collect()
 }
@@ -296,7 +294,7 @@ fn collect_sway(node: &serde_json::Value, workspace: &str, out: &mut Vec<Win>) {
                         .map(|s| s.to_string())
                 })
                 .unwrap_or_default();
-            out.push(Win { handle: id.to_string(), title, app, workspace: ws.to_string(), geom: None });
+            out.push(Win { handle: id.to_string(), title, app, workspace: ws.to_string() });
         }
     }
 
@@ -352,7 +350,7 @@ fn parse_gnome_list(raw: &str) -> Vec<Win> {
             if app.is_empty() && title.is_empty() {
                 return None;
             }
-            Some(Win { handle, title, app, workspace, geom: None })
+            Some(Win { handle, title, app, workspace })
         })
         .collect()
 }
@@ -381,7 +379,7 @@ fn parse_wmctrl_line(line: &str) -> Option<Win> {
     if app.is_empty() && title.is_empty() {
         return None;
     }
-    Some(Win { handle: handle.to_string(), title, app, workspace, geom: None })
+    Some(Win { handle: handle.to_string(), title, app, workspace })
 }
 
 #[cfg(test)]

@@ -16,7 +16,6 @@ options=('!lto')
 optdepends=(
   'wl-clipboard: clipboard history and {clipboard} snippets on Wayland'
   'xclip: clipboard support on X11'
-  'grim: live window previews on the Windows tab (Wayland/wlroots)'
   'curl: download tldr pages'
   'libarchive: extract tldr pages (bsdtar)'
   'tesseract: OCR text out of clipboard images'

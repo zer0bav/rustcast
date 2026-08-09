@@ -66,11 +66,9 @@ pub enum Prev {
     ClipImage(String),
     /// Load an image straight from an absolute path (thumbnails, files).
     ImagePath(String),
-    /// A window that can be screenshotted on demand (Hyprland `grim`). Captured
-    /// lazily by the GUI only for the selected/previewed window; `geom` is the
-    /// grim region "X,Y WxH" (None when the backend gave no geometry), and
-    /// `fallback_icon` is shown when capture fails (window occluded / off-screen).
-    WindowShot { addr: String, geom: Option<String>, fallback_icon: String },
+    /// A window preview: just the application's icon (freedesktop name), shown
+    /// large. No screenshot — a live capture isn't worth the cost.
+    WindowIcon(String),
     /// Rich file metadata block plus an optional text head.
     File { path: String, meta: String, head: Option<String> },
     /// Raycast-style detail pane: an optional image, an optional body, and a
