@@ -1,7 +1,7 @@
 # Maintainer: zer0bav <baverozmen@proton.me>
 pkgname=rustcast-git
 _pkgname=rustcast
-pkgver=r16.be7205a
+pkgver=r29.9888304
 pkgrel=1
 pkgdesc="A Raycast-class launcher for Linux (GTK4 + layer-shell) with clipboard history, file search and a tldr search"
 arch=('x86_64')
@@ -16,6 +16,7 @@ options=('!lto')
 optdepends=(
   'wl-clipboard: clipboard history and {clipboard} snippets on Wayland'
   'xclip: clipboard support on X11'
+  'grim: live window previews on the Windows tab (Wayland/wlroots)'
   'curl: download tldr pages'
   'libarchive: extract tldr pages (bsdtar)'
   'tesseract: OCR text out of clipboard images'
